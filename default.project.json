@@ -1,0 +1,44 @@
+{
+	"name": "Dive Down for Treasure",
+	"tree": {
+		"$className": "DataModel",
+		"ReplicatedStorage": {
+			"Common": {
+				"$path": "src/ReplicatedStorage"
+			},
+			"Packages": {
+				"$path": "Packages"
+			},
+			"NonWallyPackages": {
+				"$path": "NonWallyPackages"
+			}
+		},
+		"ServerScriptService": {
+			"Server": {
+				"$path": "src/ServerScriptService"
+			}
+		},
+		"ServerStorage": {
+			"Source": {
+				"$path": "src/ServerStorage"
+			}
+		},
+		"StarterPlayer": {
+			"StarterPlayerScripts": {
+				"Client": {
+					"$path": "src/StarterPlayerScripts"
+				}
+			}
+		},
+		"Workspace": {
+			"$properties": {
+				"FilteringEnabled": true
+			}
+		},
+		"SoundService": {
+			"$properties": {
+				"RespectFilteringEnabled": true
+			}
+		}
+	}
+}
