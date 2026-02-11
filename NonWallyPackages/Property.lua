@@ -171,12 +171,18 @@ end
 function Property.BindToCommProperty(commProperty)
 	assert(RunService:IsClient(), "only works on client")
 	return Promise.new(function(resolve)
-		local prop = Property.new()
+		-- 1. Wait for the initial data to arrive from the server
+		commProperty:OnReady():expect()
 
-		prop._trove:Add(commProperty:Observe(function(val)
+		-- 2. Create the property with the now-guaranteed value
+		local prop = Property.new(commProperty:Get())
+
+		-- 3. Set up the observation for future changes
+		prop._trove:Add(commProperty.Changed:Connect(function(val)
 			prop:Set(val)
-			resolve(prop)
 		end))
+
+		resolve(prop)
 	end):expect()
 end
 

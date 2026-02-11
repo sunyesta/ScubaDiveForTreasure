@@ -15,67 +15,50 @@ local Cinemachine = require(ReplicatedStorage.NonWallyPackages.Cinemachine)
 local Zone = require(ReplicatedStorage.NonWallyPackages.Zone)
 local GetAssetByName = require(ReplicatedStorage.Common.Modules.GetAssetByName)
 
-local swimmingAnimation = GetAssetByName("FishSwim")
+local swimmingAnimation = GetAssetByName("Swim")
 
 local Player = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 local Keyboard = Input.Keyboard.new()
 
 local MovementModes = {
-	Normal = "Normal",
+	Moving3D = "Moving3D",
 	Moving2D = "Moving2D",
 }
 
 local MovementController = {}
 MovementController.MovementModes = MovementModes
-MovementController.CurrentMovementMode = Property.new(nil)
+MovementController.CurrentMovementMode = Property.BindToAttribute(Player, "MovementMode", MovementModes.Moving3D)
+MovementController.MovmentPlaneNormal = Property.BindToAttribute(Player, "MovmentPlaneNormal", nil) -- Vector3 if in 2D mode or nil if in 3D mode
+MovementController.MovementPlaneOrigin = Property.BindToAttribute(Player, "MovementPlaneOrigin", nil) -- Vector3 if in 2D mode or nil if in 3D mode
 
-MovementController.SwimSpeed = Property.new(50)
+MovementController.SwimSpeed = Property.new(20)
+
+local movementTrove = Trove.new()
 
 function MovementController.GameStart()
 	print("MovementController: Game Start")
 
-	local currentMovementTrove = Trove.new()
-
-	MovementController.CurrentMovementMode:Observe(function(currentMovementMode)
-		currentMovementTrove:Clean()
-
-		print("Mode changed to:", currentMovementMode)
-
-		if currentMovementMode == MovementModes.Normal then
-			currentMovementTrove:Add(MovementController._NormalMovement())
-		elseif currentMovementMode == MovementModes.Moving2D then
-			currentMovementTrove:Add(MovementController._Moving2D())
-		elseif currentMovementMode == nil then
-			-- Initial nil state, or reset
-		else
-			warn("Unknown movement mode: " .. tostring(currentMovementMode))
-		end
-	end)
-
 	-- Toggle key binding (P)
 	local keyConnection = Keyboard.KeyUp:Connect(function(key)
 		if key == Enum.KeyCode.P then
-			if MovementController.CurrentMovementMode:Get() == MovementModes.Normal then
-				MovementController.CurrentMovementMode:Set(MovementModes.Moving2D)
+			if MovementController.CurrentMovementMode:Get() == MovementModes.Moving3D then
+				MovementController._Moving2D(Player.Character:GetPivot().Position, Vector3.new(0, 0, -1))
 			else
-				MovementController.CurrentMovementMode:Set(MovementModes.Normal)
+				MovementController._Moving3D()
 			end
 		end
 	end)
-
-	-- Initialize default mode
-	MovementController.CurrentMovementMode:Set(MovementModes.Normal)
-
-	return function()
-		currentMovementTrove:Destroy()
-		keyConnection:Disconnect()
-	end
 end
 
-function MovementController._NormalMovement()
-	local trove = Trove.new()
+function MovementController._Moving3D()
 	print("Initializing Normal Movement")
+
+	movementTrove:Clean()
+
+	MovementController.CurrentMovementMode:Set(MovementModes.Moving3D)
+	MovementController.MovementPlaneOrigin:Set(nil)
+	MovementController.MovementPlaneOrigin:Set(nil)
 
 	local character = Player.Character or Player.CharacterAdded:Wait()
 	local humanoid = character:WaitForChild("Humanoid")
@@ -83,53 +66,56 @@ function MovementController._NormalMovement()
 	-- Restore default humanoid state
 	humanoid.PlatformStand = false
 	humanoid.AutoRotate = true
-
-	return trove
 end
-
-function MovementController._Moving2D()
-	local trove = Trove.new()
+function MovementController._Moving2D(planeOrigin, planeNormal)
 	print("Initializing 2D Movement")
+
+	movementTrove:Clean()
+
+	MovementController.CurrentMovementMode:Set(MovementModes.Moving2D)
+	MovementController.MovementPlaneOrigin:Set(planeOrigin)
+	MovementController.MovmentPlaneNormal:Set(planeNormal)
 
 	-- Camera Logic
 	Cameras.PlayerCamera2D.Priority = GameEnums.CameraPriorities.PlayerCameraOverride
 	Cinemachine.Brain:RefreshPriority()
-	trove:Add(function()
+	movementTrove:Add(function()
 		Cameras.PlayerCamera2D.Priority = GameEnums.CameraPriorities.Off
 		Cinemachine.Brain:RefreshPriority()
 	end)
 
 	local character = Player.Character
 	if not character then
-		return trove
+		return
 	end
 
 	local humanoid = character:FindFirstChild("Humanoid")
 	local rootPart = character:FindFirstChild("HumanoidRootPart")
 
 	if not humanoid or not rootPart then
-		return trove
+		return
 	end
 
 	-- 1. Configuration & State
-	-- Defined early so they can be captured by Zone events
 	local swimSpeed = 50
 	local verticalSpeed = 50
 	local momentumFactor = 2 -- Lower = driftier/slippery, Higher = snappier
 	local entryDampening = 0.2 -- How much momentum is kept when entering water (0 to 1)
+	local turnResponsiveness = 200 -- Controls how fast the character turns
 
 	MovementController.SwimSpeed:Observe(function(newSwimSpeed)
 		swimSpeed = newSwimSpeed
 		verticalSpeed = newSwimSpeed
 	end)
 
-	local currentSwimVelocity = Vector3.zero
-	local isInWater = false -- Track if player is in water
+	-- Changed from Vector3 velocity to scalar speed to enforce "face-forward" movement
+	local currentForwardSpeed = 0
+	local isInWater = false
 
 	-- 2. Modify Physics/Controls
 	humanoid.AutoRotate = false
 
-	-- Stop current momentum (Only when initializing mode, not when entering water)
+	-- Stop current momentum (Only when initializing mode)
 	rootPart.AssemblyLinearVelocity = Vector3.zero
 	rootPart.AssemblyAngularVelocity = Vector3.zero
 
@@ -137,7 +123,7 @@ function MovementController._Moving2D()
 	local attachment = Instance.new("Attachment")
 	attachment.Name = "SwimAttachment"
 	attachment.Parent = rootPart
-	trove:Add(attachment)
+	movementTrove:Add(attachment)
 
 	local linearVelocity = Instance.new("LinearVelocity")
 	linearVelocity.Name = "SwimVelocity"
@@ -146,21 +132,21 @@ function MovementController._Moving2D()
 	linearVelocity.VectorVelocity = Vector3.zero
 	linearVelocity.RelativeTo = Enum.ActuatorRelativeTo.World
 	linearVelocity.Parent = rootPart
-	trove:Add(linearVelocity)
+	movementTrove:Add(linearVelocity)
 
 	local alignOrientation = Instance.new("AlignOrientation")
 	alignOrientation.Attachment0 = attachment
 	alignOrientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
 	alignOrientation.MaxTorque = 100000
-	alignOrientation.Responsiveness = 20
+	alignOrientation.Responsiveness = turnResponsiveness
 	alignOrientation.Parent = rootPart
-	trove:Add(alignOrientation)
+	movementTrove:Add(alignOrientation)
 
 	-- 4. Setup Plane Lock (Restricts depth movement)
 	local planeLockAttachment = Instance.new("Attachment")
 	planeLockAttachment.Name = "PlaneLockAttachment"
 	planeLockAttachment.Parent = rootPart
-	trove:Add(planeLockAttachment)
+	movementTrove:Add(planeLockAttachment)
 
 	local planeConstraint = Instance.new("LinearVelocity")
 	planeConstraint.Name = "PlaneConstraint"
@@ -170,37 +156,37 @@ function MovementController._Moving2D()
 	planeConstraint.VectorVelocity = Vector3.zero
 	planeConstraint.RelativeTo = Enum.ActuatorRelativeTo.Attachment0
 	planeConstraint.Parent = rootPart
-	trove:Add(planeConstraint)
+	movementTrove:Add(planeConstraint)
 
 	-- 5. Swimming Animation & Zone Detection
 	local animator = humanoid:FindFirstChild("Animator")
 	local swimTrack = nil
 
-	-- Load animation track
 	if animator and swimmingAnimation then
 		swimTrack = animator:LoadAnimation(swimmingAnimation)
 		swimTrack.Looped = true
-		trove:Add(function()
+		movementTrove:Add(function()
 			if swimTrack then
 				swimTrack:Stop()
 			end
 		end)
 	end
 
-	-- Detect "Water" tagged parts
 	local waterParts = CollectionService:GetTagged("Water")
 
 	if #waterParts > 0 then
 		local waterZone = Zone.new(waterParts)
-		trove:Add(waterZone, "destroy")
+		movementTrove:Add(waterZone, "destroy")
 
-		-- Handle Zone Events
 		waterZone.localPlayerEntered:Connect(function()
 			isInWater = true
 
 			-- Capture and dampen entrance momentum
+			-- We project the current velocity onto the look vector to keep forward momentum
 			if rootPart then
-				currentSwimVelocity = rootPart.AssemblyLinearVelocity * entryDampening
+				local currentVel = rootPart.AssemblyLinearVelocity
+				local forwardDot = currentVel:Dot(rootPart.CFrame.LookVector)
+				currentForwardSpeed = forwardDot * entryDampening
 			end
 
 			if swimTrack then
@@ -215,7 +201,6 @@ function MovementController._Moving2D()
 			end
 		end)
 
-		-- Initial check: If we spawned inside water
 		if waterZone:findLocalPlayer() then
 			isInWater = true
 			if swimTrack then
@@ -226,79 +211,98 @@ function MovementController._Moving2D()
 
 	-- 6. Update Loop
 	local updateConnection = RunService.RenderStepped:Connect(function(dt)
-		-- Determine Plane Vectors (Used for both swimming logic and plane locking)
-		local lookVector = Camera.CFrame.LookVector
-		local rightVector = Camera.CFrame.RightVector
-
-		local flatLook = (lookVector * Vector3.new(1, 0, 1))
-		local flatRight = (rightVector * Vector3.new(1, 0, 1))
-
-		if flatLook.Magnitude > 0 then
-			flatLook = flatLook.Unit
-		else
-			flatLook = Vector3.zAxis
-		end
-
-		if flatRight.Magnitude > 0 then
-			flatRight = flatRight.Unit
-		else
-			flatRight = Vector3.xAxis
-		end
-
 		-- Update Plane Lock Orientation
-		planeLockAttachment.WorldCFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + flatLook)
+		-- We orient the attachment so its Z-axis (LookVector) points along the plane normal.
+		-- This ensures the planeConstraint (which locks Z) restricts movement perpendicular to the plane.
+		planeLockAttachment.WorldCFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + planeNormal)
 
-		-- If not in water, disable custom swimming forces
 		if not isInWater then
 			linearVelocity.MaxForce = 0
 			alignOrientation.Enabled = false
-			currentSwimVelocity = Vector3.zero
+			currentForwardSpeed = 0
 			return
 		end
 
-		-- Enable forces when in water
 		linearVelocity.MaxForce = 100000
 		alignOrientation.Enabled = true
 
 		local moveDir = humanoid.MoveDirection
-		local targetVelocity = Vector3.zero
+		local targetDir = Vector3.zero
+		local targetSpeed = 0
 
+		-- Remap Inputs for 2D Swimming
 		if moveDir.Magnitude > 0.01 then
-			local forwardInput = moveDir:Dot(flatLook)
-			local rightInput = moveDir:Dot(flatRight)
+			local camCF = Camera.CFrame
 
-			-- Up/Down controls altitude
-			local vertical = Vector3.new(0, forwardInput * verticalSpeed, 0)
-			-- Left/Right controls sideways movement
-			local horizontal = rightVector * (rightInput * swimSpeed)
+			-- 1. Decompose Input relative to Camera
+			local relInput = camCF:VectorToObjectSpace(moveDir)
+			local inputRight = relInput.X
+			local inputUp = -relInput.Z -- Map Forward (W) to Up intent
 
-			targetVelocity = vertical + horizontal
+			-- 2. Define Plane Basis Vectors
+			-- Plane Right: Camera Right projected onto Plane
+			local planeRight = camCF.RightVector
+			planeRight = (planeRight - planeRight:Dot(planeNormal) * planeNormal)
+			if planeRight.Magnitude > 0.001 then
+				planeRight = planeRight.Unit
+			end
 
-			if horizontal.Magnitude > 0.1 then
-				local targetCFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + horizontal)
-				alignOrientation.CFrame = targetCFrame
+			-- Plane Up: World Up projected onto Plane (allows W to move Up against gravity)
+			local planeUp = Vector3.yAxis
+			planeUp = (planeUp - planeUp:Dot(planeNormal) * planeNormal)
+
+			-- Fallback: If plane is horizontal, use Camera Up
+			if planeUp.Magnitude < 0.001 then
+				planeUp = camCF.UpVector
+				planeUp = (planeUp - planeUp:Dot(planeNormal) * planeNormal)
+			end
+			if planeUp.Magnitude > 0.001 then
+				planeUp = planeUp.Unit
+			end
+
+			-- 3. Synthesize Direction
+			local combinedDir = (planeRight * inputRight) + (planeUp * inputUp)
+
+			if combinedDir.Magnitude > 0.01 then
+				targetDir = combinedDir.Unit
+				targetSpeed = swimSpeed
 			end
 		end
 
-		-- Apply Momentum Drift (Linear Interpolation)
-		-- Lerps current velocity towards target velocity based on time and momentum factor
-		currentSwimVelocity = currentSwimVelocity:Lerp(targetVelocity, math.clamp(dt * momentumFactor, 0, 1))
-		linearVelocity.VectorVelocity = currentSwimVelocity
+		-- Update Rotation: Face movement direction, keeping alignment with plane
+		if targetDir.Magnitude > 0.01 then
+			-- We want the character to look in the direction of movement.
+			-- We want the character's 'Right' vector to align with the planeNormal (standard 2D orientation).
+			local look = targetDir
+			local right = planeNormal
+
+			-- Calculate Up vector orthogonal to right and look
+			local up = right:Cross(look).Unit
+
+			-- Recalculate Right to ensure strict orthogonality (Cross product order matters for coordinate system)
+			local rightOrtho = look:Cross(up).Unit
+
+			-- Construct CFrame from Right, Up, and Back (-Look) vectors
+			local targetCFrame = CFrame.fromMatrix(rootPart.Position, rightOrtho, up, -look)
+			alignOrientation.CFrame = targetCFrame
+		end
+
+		-- Update Velocity: Always move along character's current forward facing
+		-- Lerp scalar speed
+		currentForwardSpeed = currentForwardSpeed
+			+ (targetSpeed - currentForwardSpeed) * math.clamp(dt * momentumFactor, 0, 1)
+
+		-- Apply along LookVector
+		linearVelocity.VectorVelocity = rootPart.CFrame.LookVector * currentForwardSpeed
 	end)
 
-	trove:Add(updateConnection)
+	movementTrove:Add(updateConnection)
 
-	-- Cleanup
-	trove:Add(function()
+	movementTrove:Add(function()
 		if humanoid and humanoid.Parent then
 			humanoid.PlatformStand = false
 			humanoid.AutoRotate = true
 		end
 	end)
-
-	return trove
 end
-
-function MovementController.Start2DMovement() end
-
 return MovementController

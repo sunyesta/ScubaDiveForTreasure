@@ -6,6 +6,7 @@ local ComponentBase = require(script.Parent.ComponentBase)
 local MathUtils = require(script.Parent.Parent.Utils.MathUtils)
 local MultiTouch = require(ReplicatedStorage.NonWallyPackages.MultiTouch)
 local ConsoleVisualizer = require(ReplicatedStorage.NonWallyPackages.ConsoleVisualizer)
+local InstanceUtils = require(ReplicatedStorage.NonWallyPackages.InstanceUtils)
 
 -- ConsoleVisualizer.new(Players.LocalPlayer.PlayerGui:WaitForChild("Console"):WaitForChild("Frame"))
 
@@ -56,9 +57,9 @@ local function FindNextValidHit(rayOrigin: Vector3, rayDirection: Vector3, rayca
 end
 
 local function DefaultCollisionFilter(part)
-	local filtered = part:HasTag("IgnoreCamera") or part.Transparency > 0.1
+	local filtered = InstanceUtils.FindFirstAncestorWithTag(part, "IgnoreCamera") or part.Transparency > 0.1
 	-- if not filtered then
-	--  print("camera collided with", part)
+	-- 	print("camera collided with", part)
 	-- end
 
 	return filtered
