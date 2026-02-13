@@ -8,12 +8,11 @@ function CharacterSetupService.GameStart()
 		playerTrove:Add(PlayerUtils.ObserveCharacterAdded(player, function(character, characterTrove)
 			local TemplateRig = GetAssetByName("TemplateRig")
 
-			local OverheadCarryAttachment = TemplateRig.UpperTorso.OverheadCarryAttachment:Clone()
-			OverheadCarryAttachment.Parent = character.UpperTorso
-			print(
-				TemplateRig.UpperTorso.OverheadCarryAttachment,
-				TemplateRig.UpperTorso.OverheadCarryAttachment.Position
-			)
+			local TemplateChestCarryAttachment = TemplateRig:FindFirstChild("ChestCarryAttachment", true)
+
+			local ChestCarryAttachment = TemplateChestCarryAttachment:Clone()
+			ChestCarryAttachment.Parent = character[TemplateChestCarryAttachment.Parent.Name]
+			print("temp", TemplateChestCarryAttachment.Position, ChestCarryAttachment.Position)
 		end))
 	end)
 end

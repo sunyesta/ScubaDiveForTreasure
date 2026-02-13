@@ -6,6 +6,7 @@ local StarterGui = game:GetService("StarterGui")
 local PlayerUtils = require(ReplicatedStorage.NonWallyPackages.PlayerUtils)
 local PlayerDataService = require(ServerStorage.Source.Services.PlayerDataService)
 local PlayerContext = require(ServerStorage.Source.Services.PlayerContext)
+local ModelUtils = require(ReplicatedStorage.NonWallyPackages.ModelUtils)
 
 Players.CharacterAutoLoads = false
 
@@ -28,6 +29,10 @@ function PlayerStartService.GameStart()
 		-- manually load character
 		playerTrove:Add(PlayerUtils.ObserveCharacterAdded(player, function(character, characterTrove)
 			local humanoid = character:WaitForChild("Humanoid")
+
+			ModelUtils.ApplyToAllBaseParts(character, function(part)
+				part.CollisionGroup = "Characters"
+			end)
 
 			humanoid.Died:Once(function()
 				if player and player.Parent then

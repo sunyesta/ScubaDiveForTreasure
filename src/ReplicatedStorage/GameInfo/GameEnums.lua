@@ -4,4 +4,9 @@ return {
 		PlayerCamera = 1,
 		PlayerCameraOverride = 2,
 	},
+	CollisionGroups = {
+		Default = "Default",
+		Characters = "Characters",
+		NoCharacters = "NoCharacters",
+	},
 }

@@ -15,5 +15,6 @@ return {
 		GameVersion = Property.CreateCommProperty(PlayerComm, "GameVersion", ""),
 		PlayerLoaded = Property.CreatePlayerCommProperty(PlayerComm, "PlayerLoaded", false),
 		Wins = Property.CreatePlayerCommProperty(PlayerComm, "Wins", 0),
+		MaxOxygen = Property.CreatePlayerCommProperty(PlayerComm, "MaxOxygen", 100),
 	},
 }

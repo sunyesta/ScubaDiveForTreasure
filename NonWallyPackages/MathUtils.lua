@@ -74,4 +74,12 @@ function MathUtils.GetRandomFromList(list)
 	return list[math.random(#list)]
 end
 
+function MathUtils.GetRandomSeed()
+	local MIN_SEED_RANGE: number = -2147483648
+	local MAX_SEED_RANGE: number = 2147483647
+
+	local seed = math.random(500)
+	return seed
+end
+
 return MathUtils

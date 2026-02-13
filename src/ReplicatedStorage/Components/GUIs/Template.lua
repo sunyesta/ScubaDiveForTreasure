@@ -13,8 +13,7 @@ local Template = Component.new({
 	Tag = "Template",
 	Ancestors = { Player },
 })
--- Template.RequireAtLeast1 = true
-ComponentRegistry.Register(Template)
+-- Template.Singleton = true
 
 function Template:Construct()
 	self._Trove = Trove.new()

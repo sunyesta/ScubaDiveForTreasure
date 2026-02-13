@@ -20,11 +20,17 @@ else
 	WaterTop.DoubleSided = true
 	WaterTop.Anchored = true
 
-	local Water: MeshPart = map.Water
-	Water.CanCollide = false
-	Water.Transparency = 1
-	Water.Anchored = true
-	Water:AddTag("Water")
+	-- local Water: MeshPart = map.Water
+	-- Water.CanCollide = false
+	-- Water.Transparency = 1
+	-- Water.Anchored = true
+	-- Water:AddTag("Water")
+
+	local WaterPlane: MeshPart = map.WaterPlane
+	WaterPlane.CanCollide = false
+	WaterPlane.Transparency = 1
+	WaterPlane.Anchored = true
+	WaterPlane:AddTag("Water")
 
 	local Dock: MeshPart = map.Dock
 	Dock.Color = Color3.fromRGB(105, 64, 40)

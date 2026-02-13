@@ -170,6 +170,8 @@ end
 -- YEILDS
 function Property.BindToCommProperty(commProperty)
 	assert(RunService:IsClient(), "only works on client")
+	assert(commProperty, "Property.BindToCommProperty: 'commProperty' argument is nil. Check your Comm setup.")
+
 	return Promise.new(function(resolve)
 		-- 1. Wait for the initial data to arrive from the server
 		commProperty:OnReady():expect()

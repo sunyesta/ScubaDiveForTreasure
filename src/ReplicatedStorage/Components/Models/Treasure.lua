@@ -1,6 +1,9 @@
+--!strict
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+local CollectionService = game:GetService("CollectionService")
 
 local Component = require(ReplicatedStorage.Packages.Component)
 local Trove = require(ReplicatedStorage.Packages.Trove)
@@ -8,196 +11,307 @@ local ClientComm = require(ReplicatedStorage.Packages.Comm).ClientComm
 local Input = require(ReplicatedStorage.Packages.Input)
 local CreateProximityPrompt = require(ReplicatedStorage.Common.Modules.GameUtils.CreateProximityPrompt)
 local Property = require(ReplicatedStorage.NonWallyPackages.Property)
-local LocalizeModel = require(ReplicatedStorage.Common.Modules.GameUtils.LocalizeModel)
+local TreasureUtils = require(ReplicatedStorage.Common.Modules.ComponentUtils.TreasureUtils)
+local LootDisplayGui = require(ReplicatedStorage.Common.Components.GUIs.LootDisplayGui)
+local GetAssetByName = require(ReplicatedStorage.Common.Modules.GetAssetByName)
+local Streamable = require(ReplicatedStorage.Packages.Streamable).Streamable
 
 local Player = Players.LocalPlayer
 local Keyboard = Input.Keyboard.new()
+
+local DropSound = GetAssetByName("BubbleAlert")
+
+local hitSounds = {
+	GetAssetByName("Hit1"),
+	GetAssetByName("Hit2"),
+	GetAssetByName("Hit3"),
+	GetAssetByName("Hit4"),
+}
 
 local TreasureClient = Component.new({
 	Tag = "Treasure",
 	Ancestors = { Workspace },
 })
 
-TreasureClient._WELD_NAME = "HoldWeld"
-TreasureClient._LOOT_LOCK_TIME = 2
-
 function TreasureClient:Construct()
-	LocalizeModel(self.Instance)
-
 	self._Trove = Trove.new()
-	self._Comm = ClientComm.new(self.Instance, true, "_Comm"):BuildObject()
+	self._Comm = ClientComm.new(self.Instance, true, "_Comm")
+	self._CommObject = self._Comm:BuildObject()
+
+	self._LockedPlayer = self._Comm:GetProperty("LockedPlayer")
 
 	self._GrabProximityPrompt = CreateProximityPrompt(self.Instance, "Grab")
+	self._AttachedPlayerName = Property.BindToAttribute(self.Instance, "_AttachedPlayerName", nil)
 
-	self._LockedPlayerIsAttached = Property.BindToAttribute(self.Instance, "LockedPlayerIsAttached", false)
-	self._LockedPlayerName = Property.BindToAttribute(self.Instance, "LockedPlayerName", nil)
+	self._InputTrove = self._Trove:Extend()
+	self._GrabTrove = self._Trove:Extend()
+
+	-- New: Specific trove for buoyancy to prevent conflicts with GrabTrove
+	self._BuoyancyTrove = self._Trove:Extend()
+
+	self._lastDropTime = 0
+	self._lastHitTime = 0
+	self._Claimed = false
 end
 
 function TreasureClient:Start()
-	-- 1. Update Interaction/Visuals
-	local function updateState()
-		local lockedPlayerName = self._LockedPlayerName:Get()
-		local isAttached = self._LockedPlayerIsAttached:Get()
+	local partStreamable = self._Trove:Add(Streamable.new(self.Instance, "RootPart"))
 
-		-- Proximity Prompt Logic
-		if (lockedPlayerName == Player.Name or lockedPlayerName == nil) and not isAttached then
-			self._GrabProximityPrompt:SetAttribute("ProxEnabled", true)
-		else
-			self._GrabProximityPrompt:SetAttribute("ProxEnabled", false)
+	partStreamable:Observe(function(rootPart, loadedTrove)
+		if rootPart then
+			self:Loaded(rootPart, loadedTrove)
 		end
+	end)
+end
 
-		-- Transparency Logic
-		if lockedPlayerName == Player.Name or lockedPlayerName == nil or isAttached then
-			self.Instance.Hitbox.Transparency = 0
-		else
-			self.Instance.Hitbox.Transparency = 0.5
-		end
+function TreasureClient:Loaded(rootPart, trove)
+	self._HitSounds = {}
+
+	for _, hitSound in hitSounds do
+		local newHitSound = trove:Add(hitSound:Clone())
+		newHitSound.Parent = rootPart
+		table.insert(self._HitSounds, newHitSound)
 	end
 
-	self._Trove:Add(self._LockedPlayerName:Observe(updateState))
-	self._Trove:Add(self._LockedPlayerIsAttached:Observe(updateState))
-
-	-- 2. Listen for Prompt Trigger
-	self._Trove:Add(self._GrabProximityPrompt.Triggered:Connect(function()
+	trove:Add(self._GrabProximityPrompt.Triggered:Connect(function()
 		self:_Grab()
 	end))
 
-	-- 3. Handle Physical Attachment
-	local attachedTrove = self._Trove:Extend()
+	trove:Add(self._AttachedPlayerName:Observe(function()
+		self:_UpdateState()
+	end))
 
-	local function updateAttachment()
-		local isAttached = self._LockedPlayerIsAttached:Get()
-		local lockedPlayerName = self._LockedPlayerName:Get()
+	trove:Add(self._LockedPlayer:Observe(function()
+		self:_UpdateState()
+	end))
 
-		-- We clean previous attachments/events whenever state changes to avoid duplication
-		attachedTrove:Clean()
-
-		if isAttached and lockedPlayerName then
-			local lockedPlayer = Players:FindFirstChild(lockedPlayerName)
-
-			-- Only attach if the player exists in Workspace
-			if lockedPlayer and lockedPlayer.Character then
-				self:_AttachTo(lockedPlayer)
-
-				-- If I am the one holding it, listen for Drop input
-				if lockedPlayer == Player then
-					attachedTrove:Add(Keyboard.KeyUp:Connect(function(keycode)
-						if keycode == Enum.KeyCode.L then
-							self:_Drop()
-						end
-					end))
-				end
-			end
-		else
-			self:_ReleaseAttached()
-		end
-	end
-
-	-- Observe both, as we need the Player Name AND the Boolean to attach correctly
-	self._Trove:Add(self._LockedPlayerIsAttached:Observe(updateAttachment))
-	self._Trove:Add(self._LockedPlayerName:Observe(updateAttachment))
+	self:_SetupBounceSounds(rootPart, trove)
 end
 
 function TreasureClient:Stop()
 	self._Trove:Clean()
 end
 
-function TreasureClient:_Grab()
-	self._LockedPlayerIsAttached:Set(true)
-	self._LockedPlayerName:Set(Player.Name)
-	self._Comm:Grab()
-end
+function TreasureClient:_UpdateState()
+	local holderName = self._AttachedPlayerName:Get()
+	local lockedPlayer = self._LockedPlayer:Get()
 
-function TreasureClient:_Drop()
-	self._LockedPlayerIsAttached:Set(false)
-	self._Comm:Drop()
-end
+	local amIHolding = (holderName == Player.Name)
+	local isHeldByAnyone = (holderName ~= nil)
 
-function TreasureClient:_GetAttachPoint(character)
-	if not character then
-		return nil, nil
+	local isLockedByMe = (lockedPlayer == Player)
+	local isLockedByOther = (lockedPlayer ~= nil and lockedPlayer ~= Player)
+
+	local timeSinceDrop = os.clock() - self._lastDropTime
+	local onCooldown = timeSinceDrop < 2
+
+	-- Update Prompt Visibility
+	if isHeldByAnyone or isLockedByOther or onCooldown then
+		self._GrabProximityPrompt.Enabled = false
+	else
+		self._GrabProximityPrompt.Enabled = true
 	end
 
-	local attachment = character:FindFirstChild("OverheadCarryAttachment", true)
-	if attachment then
-		return attachment.Parent, attachment.WorldCFrame
-	end
+	-- Input Handling
+	self._InputTrove:Clean()
 
-	local head = character:FindFirstChild("Head")
-	if head then
-		return head, head.CFrame * CFrame.new(0, 2, 0)
-	end
+	if amIHolding then
+		self._InputTrove:Add(Keyboard.KeyUp:Connect(function(key)
+			if key == Enum.KeyCode.Backspace then
+				self:_Release()
+			end
+		end))
+	else
+		-- If we aren't holding it, ensure physics are detached
+		if self.Instance.PrimaryPart then
+			TreasureUtils.Detach(self.Instance.PrimaryPart)
+		end
 
-	return nil, nil
-end
-
-function TreasureClient:_AttachTo(player)
-	local character = player.Character
-	local rootPart = self.Instance.PrimaryPart
-	if not rootPart or not character then
-		return nil
-	end
-
-	local attachPart, attachCFrame = self:_GetAttachPoint(character)
-	if not attachPart then
-		return nil
-	end
-
-	-- 1. Position the part (Visual feedback)
-	rootPart.CFrame = attachCFrame
-
-	-- 2. Clean existing welds
-	for _, child in pairs(rootPart:GetChildren()) do
-		if child.Name == TreasureClient._WELD_NAME and child:IsA("WeldConstraint") then
-			child:Destroy()
+		-- Only clean the GrabTrove (ropes/proxies) if we truly lost ownership/lock
+		-- This prevents fighting with _Release
+		if not isLockedByMe then
+			self._GrabTrove:Clean()
+			self._BuoyancyTrove:Clean() -- Clean buoyancy only when we lose the lock
 		end
 	end
-
-	-- 3. Create Weld
-	local weld = Instance.new("WeldConstraint")
-	weld.Name = TreasureClient._WELD_NAME
-	weld.Part0 = attachPart
-	weld.Part1 = rootPart
-	weld.Parent = rootPart
-	weld.Enabled = true
-
-	-- 4. Physics Properties
-	rootPart.Massless = true
-	rootPart.CanCollide = false
-	rootPart.Anchored = false -- This unanchors it so it can move with the player
-
-	if self.Instance:FindFirstChild("Hitbox") then
-		self.Instance.Hitbox.CanCollide = false
-	end
-
-	return weld
 end
 
-function TreasureClient:_ReleaseAttached()
-	local rootPart = self.Instance.PrimaryPart
-	if not rootPart then
+function TreasureClient:_Grab()
+	if os.clock() - self._lastDropTime < 2 then
 		return
 	end
 
-	-- 1. Disable/Destroy Weld(s)
-	for _, child in pairs(rootPart:GetChildren()) do
-		if child.Name == TreasureClient._WELD_NAME and child:IsA("WeldConstraint") then
-			child:Destroy()
-		end
+	self._GrabProximityPrompt.Enabled = false
+
+	-- Clean up any active buoyancy sinking immediately
+	self._BuoyancyTrove:Clean()
+	self._GrabTrove:Clean()
+
+	local primaryPart = self.Instance.PrimaryPart
+	if not primaryPart then
+		return
 	end
 
-	-- 2. Restore Physics Properties
-	rootPart.Massless = false
-	rootPart.CanCollide = true
+	primaryPart.AssemblyLinearVelocity = Vector3.zero
+	primaryPart.AssemblyAngularVelocity = Vector3.zero
 
-	-- FIXED: Removed "rootPart.Anchored = false"
-	-- This prevents the treasure from unanchoring immediately on spawn.
-	-- It will only be unanchored after it has been picked up (via _AttachTo) and dropped.
-	-- rootPart.Anchored = false
+	-- 1. Create the Client-Side Proxy Rig
+	local proxyPart, charAtt = TreasureUtils.CreateProxyRig(Player.Character, primaryPart)
 
-	local hitbox = self.Instance:FindFirstChild("Hitbox")
-	if hitbox then
-		hitbox.CanCollide = true
+	if proxyPart then
+		self._GrabTrove:Add(proxyPart)
+	end
+	if charAtt then
+		self._GrabTrove:Add(charAtt)
+	end
+
+	-- 2. Pre-Response: Force CFrame locally for instant feedback
+	local preGrabTrove = self._GrabTrove:Extend()
+	if proxyPart then
+		preGrabTrove:Add(RunService.RenderStepped:Connect(function()
+			if self.Instance.PrimaryPart then
+				self.Instance.PrimaryPart.CFrame = proxyPart.CFrame
+			end
+		end))
+	end
+
+	-- 3. Request Grab from Server
+	self._CommObject:Grab():andThen(function(success)
+		-- Stop forcing CFrame, let Physics take over
+		preGrabTrove:Clean()
+
+		if not success then
+			self:_UpdateState()
+			return
+		end
+
+		-- 4. Server gave ownership. Apply Constraints.
+		if self.Instance.PrimaryPart and proxyPart then
+			TreasureUtils.Attach(self.Instance.PrimaryPart, Player.Character, proxyPart)
+			self:_SetupCollisionDrop()
+		end
+	end)
+end
+
+function TreasureClient:_SetupBounceSounds(rootPart, trove)
+	trove:Add(rootPart.Touched:Connect(function(hit)
+		if self._AttachedPlayerName:Get() ~= nil then
+			return
+		end
+		if hit:IsDescendantOf(Player.Character) then
+			return
+		end
+
+		if os.clock() - self._lastHitTime < 0.15 then
+			return
+		end
+		if rootPart.AssemblyLinearVelocity.Magnitude < 3 then
+			return
+		end
+
+		self._lastHitTime = os.clock()
+
+		if #self._HitSounds > 0 then
+			local randomIndex = math.random(1, #self._HitSounds)
+			local randomSound = self._HitSounds[randomIndex]
+			randomSound.PlaybackSpeed = math.random(90, 110) / 100
+			randomSound:Play()
+		end
+	end))
+end
+
+function TreasureClient:_SetupCollisionDrop()
+	local primaryPart = self.Instance.PrimaryPart
+	if not primaryPart then
+		return
+	end
+
+	-- Add the connection to GrabTrove so it disconnects automatically when we drop it
+	self._GrabTrove:Add(primaryPart.Touched:Connect(function(hit)
+		if CollectionService:HasTag(hit, "TreasureDeposit") then
+			self:Claim()
+			return
+		end
+
+		local isFish = false
+		if hit.Parent and CollectionService:HasTag(hit.Parent, "Fish") then
+			isFish = true
+		end
+
+		if not hit.CanCollide and not isFish then
+			return
+		end
+
+		if hit:IsDescendantOf(self.Instance) then
+			return
+		end
+
+		if hit:IsDescendantOf(Player.Character) then
+			return
+		end
+
+		if hit.Name == "CarryProxyPart" then
+			return
+		end
+
+		if hit.Name == "BuoyancyProxy" then
+			return
+		end
+
+		print("Treasure collided with:", hit.Name, "Dropping!")
+		self:_Release()
+	end))
+end
+
+function TreasureClient:_Release()
+	self._InputTrove:Clean()
+	self._GrabTrove:Clean() -- Cleans constraints, ropes, and the Touched event
+	self._BuoyancyTrove:Clean() -- Clean any old buoyancy before starting new
+
+	DropSound:Play()
+
+	local part = self.Instance.PrimaryPart
+
+	if part then
+		TreasureUtils.Detach(part)
+
+		-- Slow it down
+		local currentVel = part.AssemblyLinearVelocity
+		part.AssemblyLinearVelocity = Vector3.new(currentVel.X * 0.2, math.min(currentVel.Y, 0), currentVel.Z * 0.2)
+		part.AssemblyAngularVelocity = part.AssemblyAngularVelocity * 0.1
+
+		-- FIX 2: Buoyancy Logic
+		-- Removed duration (previously 2) so it persists until Grab or Lock Loss
+		local buoyancy = TreasureUtils.ApplyBuoyancy(part, 0.9)
+		self._BuoyancyTrove:Add(buoyancy)
+	end
+
+	self._lastDropTime = os.clock()
+	self:_UpdateState() -- Prompt is now disabled (Cooldown)
+
+	-- FIX 3: Re-enable Prompt
+	-- Wait 2 seconds, then update state again to re-enable prompt
+	self._Trove:Add(task.delay(2.1, function()
+		self:_UpdateState()
+	end))
+
+	self._CommObject:Drop()
+end
+
+function TreasureClient:Claim()
+	if not self._Claimed then
+		self._Claimed = true
+		self.Instance:Destroy()
+		self._CommObject:Claim()
+
+		LootDisplayGui.DisplayLoot({
+			"Necklace",
+			"Rock",
+			"Yoyo",
+			"Plate",
+			"Necklace",
+			"Rock",
+		})
 	end
 end
 

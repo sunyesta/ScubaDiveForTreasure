@@ -14,6 +14,8 @@ local GameEnums = require(ReplicatedStorage.Common.GameInfo.GameEnums)
 local Cinemachine = require(ReplicatedStorage.NonWallyPackages.Cinemachine)
 local Zone = require(ReplicatedStorage.NonWallyPackages.Zone)
 local GetAssetByName = require(ReplicatedStorage.Common.Modules.GetAssetByName)
+local World2DUtils = require(ReplicatedStorage.Common.Modules.GameUtils.World2DUtils)
+local SwimmingUpgrades = require(ReplicatedStorage.Common.GameInfo.SwimmingUpgrades)
 
 local swimmingAnimation = GetAssetByName("Swim")
 
@@ -43,7 +45,7 @@ function MovementController.GameStart()
 	local keyConnection = Keyboard.KeyUp:Connect(function(key)
 		if key == Enum.KeyCode.P then
 			if MovementController.CurrentMovementMode:Get() == MovementModes.Moving3D then
-				MovementController._Moving2D(Player.Character:GetPivot().Position, Vector3.new(0, 0, -1))
+				MovementController._Moving2D(workspace.MAP.WaterPlane.Position, World2DUtils.DefaultPlaneNormal)
 			else
 				MovementController._Moving3D()
 			end
@@ -67,6 +69,7 @@ function MovementController._Moving3D()
 	humanoid.PlatformStand = false
 	humanoid.AutoRotate = true
 end
+
 function MovementController._Moving2D(planeOrigin, planeNormal)
 	print("Initializing 2D Movement")
 
@@ -97,19 +100,18 @@ function MovementController._Moving2D(planeOrigin, planeNormal)
 	end
 
 	-- 1. Configuration & State
-	local swimSpeed = 50
-	local verticalSpeed = 50
-	local momentumFactor = 2 -- Lower = driftier/slippery, Higher = snappier
-	local entryDampening = 0.2 -- How much momentum is kept when entering water (0 to 1)
-	local turnResponsiveness = 200 -- Controls how fast the character turns
+	local swimSpeed = 25
 
-	MovementController.SwimSpeed:Observe(function(newSwimSpeed)
-		swimSpeed = newSwimSpeed
-		verticalSpeed = newSwimSpeed
-	end)
+	-- Controls how "slippery" the movement is.
+	-- Lower (e.g., 1.0) = More drift, momentum overrides direction longer.
+	-- Higher (e.g., 10.0) = Snappy, instant turns.
+	local momentumStrength = 0.5
 
-	-- Changed from Vector3 velocity to scalar speed to enforce "face-forward" movement
-	local currentForwardSpeed = 0
+	local entryDampening = 0.5 -- How much momentum is kept when entering water (0 to 1)
+	local turnResponsiveness = 200 -- Controls how fast the character model physically rotates
+
+	-- Track Velocity as a Vector3 now, not just speed
+	local currentMoveVelocity = Vector3.zero
 	local isInWater = false
 
 	-- 2. Modify Physics/Controls
@@ -142,21 +144,8 @@ function MovementController._Moving2D(planeOrigin, planeNormal)
 	alignOrientation.Parent = rootPart
 	movementTrove:Add(alignOrientation)
 
-	-- 4. Setup Plane Lock (Restricts depth movement)
-	local planeLockAttachment = Instance.new("Attachment")
-	planeLockAttachment.Name = "PlaneLockAttachment"
-	planeLockAttachment.Parent = rootPart
-	movementTrove:Add(planeLockAttachment)
-
-	local planeConstraint = Instance.new("LinearVelocity")
-	planeConstraint.Name = "PlaneConstraint"
-	planeConstraint.Attachment0 = planeLockAttachment
-	planeConstraint.ForceLimitMode = Enum.ForceLimitMode.PerAxis
-	planeConstraint.MaxAxesForce = Vector3.new(0, 0, 1000000) -- Lock Z axis only (relative to attachment)
-	planeConstraint.VectorVelocity = Vector3.zero
-	planeConstraint.RelativeTo = Enum.ActuatorRelativeTo.Attachment0
-	planeConstraint.Parent = rootPart
-	movementTrove:Add(planeConstraint)
+	-- 4. Setup Plane Lock (Restricts depth movement) using World2DUtils
+	movementTrove:Add(World2DUtils.ConstrainToPlane(rootPart, planeOrigin, planeNormal))
 
 	-- 5. Swimming Animation & Zone Detection
 	local animator = humanoid:FindFirstChild("Animator")
@@ -181,12 +170,10 @@ function MovementController._Moving2D(planeOrigin, planeNormal)
 		waterZone.localPlayerEntered:Connect(function()
 			isInWater = true
 
-			-- Capture and dampen entrance momentum
-			-- We project the current velocity onto the look vector to keep forward momentum
+			-- Capture entrance momentum
 			if rootPart then
-				local currentVel = rootPart.AssemblyLinearVelocity
-				local forwardDot = currentVel:Dot(rootPart.CFrame.LookVector)
-				currentForwardSpeed = forwardDot * entryDampening
+				-- We retain a percentage of the existing velocity so you don't stop instantly
+				currentMoveVelocity = rootPart.AssemblyLinearVelocity * entryDampening
 			end
 
 			if swimTrack then
@@ -211,15 +198,10 @@ function MovementController._Moving2D(planeOrigin, planeNormal)
 
 	-- 6. Update Loop
 	local updateConnection = RunService.RenderStepped:Connect(function(dt)
-		-- Update Plane Lock Orientation
-		-- We orient the attachment so its Z-axis (LookVector) points along the plane normal.
-		-- This ensures the planeConstraint (which locks Z) restricts movement perpendicular to the plane.
-		planeLockAttachment.WorldCFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + planeNormal)
-
 		if not isInWater then
 			linearVelocity.MaxForce = 0
 			alignOrientation.Enabled = false
-			currentForwardSpeed = 0
+			currentMoveVelocity = Vector3.zero
 			return
 		end
 
@@ -228,7 +210,7 @@ function MovementController._Moving2D(planeOrigin, planeNormal)
 
 		local moveDir = humanoid.MoveDirection
 		local targetDir = Vector3.zero
-		local targetSpeed = 0
+		local targetVelocity = Vector3.zero
 
 		-- Remap Inputs for 2D Swimming
 		if moveDir.Magnitude > 0.01 then
@@ -265,21 +247,20 @@ function MovementController._Moving2D(planeOrigin, planeNormal)
 
 			if combinedDir.Magnitude > 0.01 then
 				targetDir = combinedDir.Unit
-				targetSpeed = swimSpeed
+				targetVelocity = targetDir * swimSpeed
 			end
 		end
 
-		-- Update Rotation: Face movement direction, keeping alignment with plane
+		-- Update Rotation: Face movement direction (INPUT direction), not current velocity
+		-- This allows the character to turn visually while momentum carries them sideways (drift)
 		if targetDir.Magnitude > 0.01 then
-			-- We want the character to look in the direction of movement.
-			-- We want the character's 'Right' vector to align with the planeNormal (standard 2D orientation).
 			local look = targetDir
 			local right = planeNormal
 
 			-- Calculate Up vector orthogonal to right and look
 			local up = right:Cross(look).Unit
 
-			-- Recalculate Right to ensure strict orthogonality (Cross product order matters for coordinate system)
+			-- Recalculate Right to ensure strict orthogonality
 			local rightOrtho = look:Cross(up).Unit
 
 			-- Construct CFrame from Right, Up, and Back (-Look) vectors
@@ -287,13 +268,12 @@ function MovementController._Moving2D(planeOrigin, planeNormal)
 			alignOrientation.CFrame = targetCFrame
 		end
 
-		-- Update Velocity: Always move along character's current forward facing
-		-- Lerp scalar speed
-		currentForwardSpeed = currentForwardSpeed
-			+ (targetSpeed - currentForwardSpeed) * math.clamp(dt * momentumFactor, 0, 1)
+		-- Update Velocity: Lerp the VECTOR, not just the speed
+		-- This allows momentum to override direction
+		currentMoveVelocity = currentMoveVelocity:Lerp(targetVelocity, math.clamp(dt * momentumStrength, 0, 1))
 
-		-- Apply along LookVector
-		linearVelocity.VectorVelocity = rootPart.CFrame.LookVector * currentForwardSpeed
+		-- Apply velocity in World Space
+		linearVelocity.VectorVelocity = currentMoveVelocity
 	end)
 
 	movementTrove:Add(updateConnection)
@@ -305,4 +285,5 @@ function MovementController._Moving2D(planeOrigin, planeNormal)
 		end
 	end)
 end
+
 return MovementController
