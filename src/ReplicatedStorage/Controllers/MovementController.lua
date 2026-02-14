@@ -107,7 +107,7 @@ function MovementController._Moving2D(planeOrigin, planeNormal)
 	-- Higher (e.g., 10.0) = Snappy, instant turns.
 	local momentumStrength = 0.5
 
-	local entryDampening = 0.5 -- How much momentum is kept when entering water (0 to 1)
+	local entryDampening = 0.1 -- How much momentum is kept when entering water (0 to 1)
 	local turnResponsiveness = 200 -- Controls how fast the character model physically rotates
 
 	-- Track Velocity as a Vector3 now, not just speed

@@ -51,7 +51,10 @@ function TreasureClient:Construct()
 
 	self._lastDropTime = 0
 	self._lastHitTime = 0
+	self._lastGrabTime = 0 -- NEW: Track when we last grabbed the item
 	self._Claimed = false
+
+	self.GrabSound = GetAssetByName("ChestPickup")
 end
 
 function TreasureClient:Start()
@@ -137,6 +140,8 @@ function TreasureClient:_UpdateState()
 end
 
 function TreasureClient:_Grab()
+	self.GrabSound:Play()
+
 	if os.clock() - self._lastDropTime < 2 then
 		return
 	end
@@ -187,6 +192,7 @@ function TreasureClient:_Grab()
 
 		-- 4. Server gave ownership. Apply Constraints.
 		if self.Instance.PrimaryPart and proxyPart then
+			self._lastGrabTime = os.clock() -- NEW: Mark exact time we grabbed it
 			TreasureUtils.Attach(self.Instance.PrimaryPart, Player.Character, proxyPart)
 			self:_SetupCollisionDrop()
 		end
@@ -228,6 +234,12 @@ function TreasureClient:_SetupCollisionDrop()
 
 	-- Add the connection to GrabTrove so it disconnects automatically when we drop it
 	self._GrabTrove:Add(primaryPart.Touched:Connect(function(hit)
+		-- NEW: Grace Period Check
+		-- If less than 1 second has passed since we grabbed it, ignore collisions
+		if os.clock() - self._lastGrabTime < 1.0 then
+			return
+		end
+
 		if CollectionService:HasTag(hit, "TreasureDeposit") then
 			self:Claim()
 			return

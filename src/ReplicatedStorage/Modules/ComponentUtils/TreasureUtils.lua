@@ -281,7 +281,7 @@ function TreasureUtils.ApplyBuoyancy(part: BasePart, strength: number, duration:
 	-- IMPORTANT: Must be UNANCHORED for VectorForce to move it.
 	local proxy = trove:Add(part:Clone())
 	proxy.Name = "BuoyancyProxy"
-	proxy.Transparency = 0.5
+	proxy.Transparency = 1
 	proxy.CanCollide = true
 	proxy.Anchored = false
 	proxy.Massless = false -- Must have mass for forces to work
