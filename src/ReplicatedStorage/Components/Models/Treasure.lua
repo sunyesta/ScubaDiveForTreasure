@@ -15,11 +15,14 @@ local TreasureUtils = require(ReplicatedStorage.Common.Modules.ComponentUtils.Tr
 local LootDisplayGui = require(ReplicatedStorage.Common.Components.GUIs.LootDisplayGui)
 local GetAssetByName = require(ReplicatedStorage.Common.Modules.GetAssetByName)
 local Streamable = require(ReplicatedStorage.Packages.Streamable).Streamable
+local InstanceUtils = require(ReplicatedStorage.NonWallyPackages.InstanceUtils)
+local SpawnVisualEffect = require(ReplicatedStorage.Common.Modules.GameUtils.SpawnVisualEffect)
 
 local Player = Players.LocalPlayer
 local Keyboard = Input.Keyboard.new()
 
 local DropSound = GetAssetByName("BubbleAlert")
+local BreakSound = GetAssetByName("BreakSound")
 
 local hitSounds = {
 	GetAssetByName("Hit1"),
@@ -32,6 +35,8 @@ local TreasureClient = Component.new({
 	Tag = "Treasure",
 	Ancestors = { Workspace },
 })
+
+TreasureClient.HoldingTreasure = Property.new(nil)
 
 function TreasureClient:Construct()
 	self._Trove = Trove.new()
@@ -88,6 +93,12 @@ function TreasureClient:Loaded(rootPart, trove)
 		self:_UpdateState()
 	end))
 
+	trove:Add(self._CommObject.Broken:Connect(function(player)
+		if player ~= Player then
+			self:Break()
+		end
+	end))
+
 	self:_SetupBounceSounds(rootPart, trove)
 end
 
@@ -121,7 +132,7 @@ function TreasureClient:_UpdateState()
 	if amIHolding then
 		self._InputTrove:Add(Keyboard.KeyUp:Connect(function(key)
 			if key == Enum.KeyCode.Backspace then
-				self:_Release()
+				self:Release()
 			end
 		end))
 	else
@@ -156,6 +167,11 @@ function TreasureClient:_Grab()
 	if not primaryPart then
 		return
 	end
+
+	TreasureClient.HoldingTreasure:Set(self)
+	self._GrabTrove:Add(function()
+		TreasureClient.HoldingTreasure:Set(nil)
+	end)
 
 	primaryPart.AssemblyLinearVelocity = Vector3.zero
 	primaryPart.AssemblyAngularVelocity = Vector3.zero
@@ -245,12 +261,12 @@ function TreasureClient:_SetupCollisionDrop()
 			return
 		end
 
-		local isFish = false
-		if hit.Parent and CollectionService:HasTag(hit.Parent, "Fish") then
-			isFish = true
+		local isDropPart = false
+		if InstanceUtils.FindFirstAncestorWithTag(hit, "DropPart") then
+			isDropPart = true
 		end
 
-		if not hit.CanCollide and not isFish then
+		if not isDropPart then
 			return
 		end
 
@@ -271,11 +287,11 @@ function TreasureClient:_SetupCollisionDrop()
 		end
 
 		print("Treasure collided with:", hit.Name, "Dropping!")
-		self:_Release()
+		self:Release()
 	end))
 end
 
-function TreasureClient:_Release()
+function TreasureClient:Release()
 	self._InputTrove:Clean()
 	self._GrabTrove:Clean() -- Cleans constraints, ropes, and the Touched event
 	self._BuoyancyTrove:Clean() -- Clean any old buoyancy before starting new
@@ -325,6 +341,13 @@ function TreasureClient:Claim()
 			"Rock",
 		})
 	end
+end
+
+function TreasureClient:Break()
+	BreakSound:Play()
+	SpawnVisualEffect.WoodChips(self.Instance.PrimaryPart.Position, Color3.new(0.403921, 0.243137, 0.121568))
+	self.Instance:Destroy()
+	self._CommObject:Break()
 end
 
 return TreasureClient

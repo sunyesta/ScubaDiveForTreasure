@@ -10,6 +10,7 @@ local Trove = require(ReplicatedStorage.Packages.Trove)
 local Streamable = require(ReplicatedStorage.Packages.Streamable).Streamable
 local World2DUtils = require(ReplicatedStorage.Common.Modules.GameUtils.World2DUtils)
 local GameEnums = require(ReplicatedStorage.Common.GameInfo.GameEnums)
+local Cullable = require(ReplicatedStorage.NonWallyPackages.Cullable)
 
 -- Type Definitions
 type FishConfig = {
@@ -19,7 +20,6 @@ type FishConfig = {
 	WALL_BUFFER: number,
 	BANK_FACTOR: number, -- How much the fish leans into turns
 	LERP_SPEED: number, -- Visual smoothing factor
-	CULL_DISTANCE: number, -- Max distance to render movement
 	FISH_SIZE: number, -- Approximate size of the fish model
 	VISIBILITY_PADDING: number, -- Extra buffer for culling
 }
@@ -31,7 +31,6 @@ local CONFIG: FishConfig = {
 	WALL_BUFFER = 1.5,
 	BANK_FACTOR = 25,
 	LERP_SPEED = 10,
-	CULL_DISTANCE = 150,
 	FISH_SIZE = 4,
 	VISIBILITY_PADDING = 10,
 }
@@ -49,7 +48,6 @@ function FishClient:Construct()
 	self.MovementPlaneNormal = World2DUtils.DefaultPlaneNormal
 	self.StartPosition = Vector3.zero -- Assigned on Load
 	self.CurrentRoll = 0 -- For smooth banking transitions
-	self.WasVisible = false -- Track visibility to handle snapping
 
 	-- Attributes
 	self.RandomSeed = self.Instance:GetAttribute("RandomSeed") or math.random(1, 10000)
@@ -60,6 +58,8 @@ function FishClient:Construct()
 	self.RayParams.FilterDescendantsInstances = { self.Instance }
 	self.RayParams.IgnoreWater = true
 	self.RayParams.CollisionGroup = GameEnums.CollisionGroups.NoCharacters
+
+	self.Instance:AddTag("DropPart")
 end
 
 function FishClient:Start()
@@ -73,62 +73,6 @@ end
 
 function FishClient:Stop()
 	self._Trove:Clean()
-end
-
--- Optimized Visibility Check
--- Complexity: O(1) - Checks if the swim area sphere intersects the frustum
-function FishClient:ShouldRender(): boolean
-	local camera = Workspace.CurrentCamera
-	if not camera then
-		return false
-	end
-
-	local origin = self.StartPosition
-	-- Define the bounding sphere that encompasses the fish's entire possible movement + size + padding
-	local checkRadius = CONFIG.SWIM_RADIUS + CONFIG.FISH_SIZE + CONFIG.VISIBILITY_PADDING
-
-	local distToCamera = (camera.CFrame.Position - origin).Magnitude
-
-	-- 1. Coarse Distance Cull (Cheap)
-	-- If the closest point of the bounding sphere is beyond the cull distance
-	if distToCamera - checkRadius > CONFIG.CULL_DISTANCE then
-		return false
-	end
-
-	-- 2. Camera Inside Check
-	-- If the camera is inside the visibility sphere, always render
-	if distToCamera < checkRadius then
-		return true
-	end
-
-	-- 3. Frustum Cull with Radius (Sphere-Frustum Intersection approximation)
-	local screenPoint, onScreen = camera:WorldToViewportPoint(origin)
-
-	if onScreen then
-		return true
-	end
-
-	-- If the center is off-screen, check if the sphere radius bleeds into the view
-	if screenPoint.Z > 0 then
-		local viewportSize = camera.ViewportSize
-
-		-- Calculate pixels per stud at the depth of the object
-		-- Formula: Height = 2 * Depth * tan(FOV/2)
-		local fovRad = math.rad(camera.FieldOfView)
-		local frustumHeight = 2 * screenPoint.Z * math.tan(fovRad * 0.5)
-		local pxPerStud = viewportSize.Y / frustumHeight
-
-		-- Project the 3D radius to 2D pixel radius
-		local radiusPx = checkRadius * pxPerStud
-
-		-- Check bounds with the projected radius expansion
-		local minX, maxX = -radiusPx, viewportSize.X + radiusPx
-		local minY, maxY = -radiusPx, viewportSize.Y + radiusPx
-
-		return screenPoint.X >= minX and screenPoint.X <= maxX and screenPoint.Y >= minY and screenPoint.Y <= maxY
-	end
-
-	return false
 end
 
 function FishClient:OnRootPartLoaded(rootPart: BasePart)
@@ -148,17 +92,27 @@ function FishClient:OnRootPartLoaded(rootPart: BasePart)
 	self.PlaneRight = normal:Cross(globalUp).Unit
 	self.PlaneUp = self.PlaneRight:Cross(normal).Unit
 
-	self._Trove:Connect(RunService.Heartbeat, function(dt: number)
-		local isVisible = self:ShouldRender()
+	-- Setup Culling
+	-- We track the entire swim radius so the fish doesn't pop in/out
+	-- when swimming near the edge of the zone.
+	local cullRadius = CONFIG.SWIM_RADIUS + CONFIG.FISH_SIZE + CONFIG.VISIBILITY_PADDING
 
-		if isVisible then
-			-- If we weren't visible last frame, snap to position (no lerp)
-			-- This prevents the fish from "flying" in from its old position
-			local snap = not self.WasVisible
-			self:UpdateMovement(dt, snap)
-		end
+	-- We use the static constructor for Sphere culling
+	local cullable = self._Trove:Add(Cullable.NewForSphere(self.StartPosition, cullRadius))
 
-		self.WasVisible = isVisible
+	-- Observe visibility
+	cullable:Observe(function(target, visibleTrove)
+		-- This callback runs when the fish's zone enters the screen
+		-- visibleTrove is automatically cleaned when it leaves the screen
+
+		local isFirstFrame = true
+
+		visibleTrove:Connect(RunService.Heartbeat, function(dt: number)
+			-- If this is the first frame of visibility, we "snap" to position
+			-- to prevent lerping from the last known position (teleporting visual)
+			self:UpdateMovement(dt, isFirstFrame)
+			isFirstFrame = false
+		end)
 	end)
 end
 

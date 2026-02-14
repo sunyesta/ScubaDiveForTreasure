@@ -50,7 +50,7 @@ function Property.new(value, typeLocked, noNils)
 	self._trove = Trove.new()
 	self._value = value
 	self._noNils = noNils
-	self._changed = self._trove:Add(Signal.new())
+	self.Changed = self._trove:Add(Signal.new())
 
 	return self
 end
@@ -64,7 +64,7 @@ function Property.ReadOnly(property)
 		-- Access internal state to bypass the ReadOnly Set check we are about to add
 		if readOnlyProp._value ~= val then
 			readOnlyProp._value = val
-			readOnlyProp._changed:Fire(val)
+			readOnlyProp.Changed:Fire(val)
 		end
 	end))
 
@@ -99,7 +99,7 @@ function Property.BindToAttribute(instance, attributeName, defaultValue)
 		if prop:Get() ~= attrVal then
 			-- Update internal value directly to support ReadOnly mode
 			prop._value = attrVal
-			prop._changed:Fire(attrVal)
+			prop.Changed:Fire(attrVal)
 		end
 	end))
 
@@ -146,7 +146,7 @@ function Property.BindToInstanceProperty(instance, instancePropertyName, default
 		if prop:Get() ~= newVal then
 			-- Update internal value directly to support ReadOnly mode and avoid recursive loops
 			prop._value = newVal
-			prop._changed:Fire(newVal)
+			prop.Changed:Fire(newVal)
 		end
 	end))
 
@@ -244,12 +244,12 @@ function NormalProp:Set(value)
 	end
 
 	self._value = value
-	self._changed:Fire(value)
+	self.Changed:Fire(value)
 end
 
 function NormalProp:Observe(callback)
 	task.spawn(callback, self._value)
-	return self._changed:Connect(callback)
+	return self.Changed:Connect(callback)
 end
 
 function NormalProp:WaitForTrue()
@@ -260,7 +260,7 @@ function NormalProp:WaitForTrue()
 		end
 
 		local connection
-		connection = self._changed:Connect(function(value)
+		connection = self.Changed:Connect(function(value)
 			if value then
 				connection:Disconnect()
 				resolve()

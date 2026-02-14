@@ -7,29 +7,23 @@ local Streamable = require(ReplicatedStorage.Packages.Streamable).Streamable
 
 local Player = Players.LocalPlayer
 
-local Template = Component.new({
-	Tag = "Template",
+local Water = Component.new({
+	Tag = "Water",
 	Ancestors = { Workspace },
 })
 
-function Template:Construct()
+function Water:Construct()
 	self._Trove = Trove.new()
 end
 
-function Template:Start()
-	local partStreamable = self._Trove:Add(Streamable.new(self.Instance, "RootPart"))
-
-	self._Trove:Add(partStreamable:Observe(function(rootPart, loadedTrove)
-		if rootPart then
-			self:Loaded(rootPart, loadedTrove)
-		end
-	end))
+function Water:Start()
+	self.Instance.Size = Vector3.new(self.Instance.Size.X, self.Instance.Size.Y, 50)
 end
 
-function Template:Stop()
+function Water:Stop()
 	self._Trove:Clean()
 end
 
-function Template:Loaded(rootPart, trove) end
+function Water:Loaded(rootPart, trove) end
 
-return Template
+return Water

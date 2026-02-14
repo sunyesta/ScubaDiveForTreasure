@@ -31,7 +31,7 @@ function TreasureServer:Construct()
 	self._HoldingPlayer = Property.new(nil)
 	self._ReservedBy = Property.new(nil)
 	self._LockedPlayer = Property.CreateCommProperty(self._Comm, "LockedPlayer", nil)
-
+	self._Broken = self._Comm:CreateSignal("Broken")
 	-- RunService.Stepped:Connect(function(time, deltaTime)
 	-- 	if self.Instance.PrimaryPart.Anchored == false then
 	-- 		print(self.Instance.PrimaryPart:GetNetworkOwner())
@@ -71,6 +71,10 @@ function TreasureServer:Start()
 
 	self._Comm:BindFunction("Claim", function(player)
 		self:ClaimFor(player)
+	end)
+
+	self._Comm:BindFunction("Break", function(player)
+		self:Break(player)
 	end)
 end
 
@@ -203,5 +207,13 @@ function TreasureServer:Drop(player)
 end
 
 function TreasureServer:ClaimFor(player) end
+
+function TreasureServer:Break(player)
+	self._Broken:FireAll(player)
+	task.spawn(function()
+		task.wait(1)
+		self.Instance:Destroy()
+	end)
+end
 
 return TreasureServer

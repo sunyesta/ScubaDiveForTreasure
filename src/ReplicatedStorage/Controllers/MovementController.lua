@@ -30,26 +30,59 @@ local MovementModes = {
 
 local MovementController = {}
 MovementController.MovementModes = MovementModes
-MovementController.CurrentMovementMode = Property.BindToAttribute(Player, "MovementMode", MovementModes.Moving3D)
-MovementController.MovmentPlaneNormal = Property.BindToAttribute(Player, "MovmentPlaneNormal", nil) -- Vector3 if in 2D mode or nil if in 3D mode
-MovementController.MovementPlaneOrigin = Property.BindToAttribute(Player, "MovementPlaneOrigin", nil) -- Vector3 if in 2D mode or nil if in 3D mode
+MovementController._CurrentMovementMode = Property.new(MovementModes.Moving3D)
+MovementController._MovmentPlaneNormal = Property.new(nil) -- Vector3 if in 2D mode or nil if in 3D mode
+MovementController._MovementPlaneOrigin = Property.new(nil) -- Vector3 if in 2D mode or nil if in 3D mode
+
+MovementController.DEFAULT_SWIMMING_FRICTION_WEIGHT = 0.5
+
+MovementController.CurrentMovementMode = Property.ReadOnly(MovementController._CurrentMovementMode)
+MovementController.CharacterStunned = Property.new(false)
+MovementController.SwimmingFrictionWeight = Property.new(MovementController.DEFAULT_SWIMMING_FRICTION_WEIGHT)
 
 MovementController.SwimSpeed = Property.new(20)
 
 local movementTrove = Trove.new()
+
+-- Constants for 3D Movement
+local DEFAULT_WALK_SPEED = 16
+local DEFAULT_JUMP_POWER = 50
 
 function MovementController.GameStart()
 	print("MovementController: Game Start")
 
 	-- Toggle key binding (P)
 	local keyConnection = Keyboard.KeyUp:Connect(function(key)
+		-- Prevent mode switching if stunned
+		if MovementController.CharacterStunned:Get() then
+			return
+		end
+
 		if key == Enum.KeyCode.P then
-			if MovementController.CurrentMovementMode:Get() == MovementModes.Moving3D then
+			if MovementController._CurrentMovementMode:Get() == MovementModes.Moving3D then
 				MovementController._Moving2D(workspace.MAP.WaterPlane.Position, World2DUtils.DefaultPlaneNormal)
 			else
 				MovementController._Moving3D()
 			end
 		end
+	end)
+
+	-- Handle Stun Effects globally (specifically for 3D mode properties)
+	MovementController.CharacterStunned.Changed:Connect(function(isStunned)
+		local currentMode = MovementController._CurrentMovementMode:Get()
+
+		-- If we are in 3D mode, we must manually disable Humanoid stats
+		if currentMode == MovementModes.Moving3D then
+			local character = Player.Character
+			local humanoid = character and character:FindFirstChild("Humanoid")
+
+			if humanoid then
+				humanoid.WalkSpeed = isStunned and 0 or DEFAULT_WALK_SPEED
+				humanoid.JumpPower = isStunned and 0 or DEFAULT_JUMP_POWER
+			end
+		end
+
+		-- Note: 2D mode handles stun checks inside its own RenderStepped loop
 	end)
 end
 
@@ -58,9 +91,9 @@ function MovementController._Moving3D()
 
 	movementTrove:Clean()
 
-	MovementController.CurrentMovementMode:Set(MovementModes.Moving3D)
-	MovementController.MovementPlaneOrigin:Set(nil)
-	MovementController.MovementPlaneOrigin:Set(nil)
+	MovementController._CurrentMovementMode:Set(MovementModes.Moving3D)
+	MovementController._MovementPlaneOrigin:Set(nil)
+	MovementController._MovementPlaneOrigin:Set(nil)
 
 	local character = Player.Character or Player.CharacterAdded:Wait()
 	local humanoid = character:WaitForChild("Humanoid")
@@ -68,6 +101,11 @@ function MovementController._Moving3D()
 	-- Restore default humanoid state
 	humanoid.PlatformStand = false
 	humanoid.AutoRotate = true
+
+	-- Apply correct speed based on current stun status
+	local isStunned = MovementController.CharacterStunned:Get()
+	humanoid.WalkSpeed = isStunned and 0 or DEFAULT_WALK_SPEED
+	humanoid.JumpPower = isStunned and 0 or DEFAULT_JUMP_POWER
 end
 
 function MovementController._Moving2D(planeOrigin, planeNormal)
@@ -75,9 +113,9 @@ function MovementController._Moving2D(planeOrigin, planeNormal)
 
 	movementTrove:Clean()
 
-	MovementController.CurrentMovementMode:Set(MovementModes.Moving2D)
-	MovementController.MovementPlaneOrigin:Set(planeOrigin)
-	MovementController.MovmentPlaneNormal:Set(planeNormal)
+	MovementController._CurrentMovementMode:Set(MovementModes.Moving2D)
+	MovementController._MovementPlaneOrigin:Set(planeOrigin)
+	MovementController._MovmentPlaneNormal:Set(planeNormal)
 
 	-- Camera Logic
 	Cameras.PlayerCamera2D.Priority = GameEnums.CameraPriorities.PlayerCameraOverride
@@ -101,11 +139,6 @@ function MovementController._Moving2D(planeOrigin, planeNormal)
 
 	-- 1. Configuration & State
 	local swimSpeed = 25
-
-	-- Controls how "slippery" the movement is.
-	-- Lower (e.g., 1.0) = More drift, momentum overrides direction longer.
-	-- Higher (e.g., 10.0) = Snappy, instant turns.
-	local momentumStrength = 0.5
 
 	local entryDampening = 0.1 -- How much momentum is kept when entering water (0 to 1)
 	local turnResponsiveness = 200 -- Controls how fast the character model physically rotates
@@ -205,15 +238,18 @@ function MovementController._Moving2D(planeOrigin, planeNormal)
 			return
 		end
 
+		-- Check for Stun status
+		local isStunned = MovementController.CharacterStunned:Get()
+
 		linearVelocity.MaxForce = 100000
-		alignOrientation.Enabled = true
+		alignOrientation.Enabled = true -- Keep enabled to maintain rotation, or disable if you want them limp
 
 		local moveDir = humanoid.MoveDirection
 		local targetDir = Vector3.zero
 		local targetVelocity = Vector3.zero
 
-		-- Remap Inputs for 2D Swimming
-		if moveDir.Magnitude > 0.01 then
+		-- Remap Inputs for 2D Swimming (Only if NOT stunned)
+		if not isStunned and moveDir.Magnitude > 0.01 then
 			local camCF = Camera.CFrame
 
 			-- 1. Decompose Input relative to Camera
@@ -249,11 +285,14 @@ function MovementController._Moving2D(planeOrigin, planeNormal)
 				targetDir = combinedDir.Unit
 				targetVelocity = targetDir * swimSpeed
 			end
+		elseif isStunned then
+			-- If stunned, target velocity is zero (stops movement)
+			targetVelocity = Vector3.zero
 		end
 
-		-- Update Rotation: Face movement direction (INPUT direction), not current velocity
-		-- This allows the character to turn visually while momentum carries them sideways (drift)
-		if targetDir.Magnitude > 0.01 then
+		-- Update Rotation: Only rotate if we have a target direction and are NOT stunned
+		-- (Optional: You can remove the 'not isStunned' check if you want them to face input even while stunned)
+		if not isStunned and targetDir.Magnitude > 0.01 then
 			local look = targetDir
 			local right = planeNormal
 
@@ -270,7 +309,10 @@ function MovementController._Moving2D(planeOrigin, planeNormal)
 
 		-- Update Velocity: Lerp the VECTOR, not just the speed
 		-- This allows momentum to override direction
-		currentMoveVelocity = currentMoveVelocity:Lerp(targetVelocity, math.clamp(dt * momentumStrength, 0, 1))
+		currentMoveVelocity = currentMoveVelocity:Lerp(
+			targetVelocity,
+			math.clamp(dt * MovementController.SwimmingFrictionWeight:Get(), 0, 1)
+		)
 
 		-- Apply velocity in World Space
 		linearVelocity.VectorVelocity = currentMoveVelocity
@@ -282,6 +324,9 @@ function MovementController._Moving2D(planeOrigin, planeNormal)
 		if humanoid and humanoid.Parent then
 			humanoid.PlatformStand = false
 			humanoid.AutoRotate = true
+			-- Reset WalkSpeed on exit just in case
+			humanoid.WalkSpeed = DEFAULT_WALK_SPEED
+			humanoid.JumpPower = DEFAULT_JUMP_POWER
 		end
 	end)
 end
