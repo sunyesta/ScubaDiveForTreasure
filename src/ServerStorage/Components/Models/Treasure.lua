@@ -206,7 +206,11 @@ function TreasureServer:Drop(player)
 	end
 end
 
-function TreasureServer:ClaimFor(player) end
+function TreasureServer:ClaimFor(player)
+	local loot = TreasureUtils.GetLoot(self)
+
+	self.Instance:Destroy()
+end
 
 function TreasureServer:Break(player)
 	self._Broken:FireAll(player)

@@ -12,11 +12,11 @@ local Input = require(ReplicatedStorage.Packages.Input)
 local CreateProximityPrompt = require(ReplicatedStorage.Common.Modules.GameUtils.CreateProximityPrompt)
 local Property = require(ReplicatedStorage.NonWallyPackages.Property)
 local TreasureUtils = require(ReplicatedStorage.Common.Modules.ComponentUtils.TreasureUtils)
-local LootDisplayGui = require(ReplicatedStorage.Common.Components.GUIs.LootDisplayGui)
 local GetAssetByName = require(ReplicatedStorage.Common.Modules.GetAssetByName)
 local Streamable = require(ReplicatedStorage.Packages.Streamable).Streamable
 local InstanceUtils = require(ReplicatedStorage.NonWallyPackages.InstanceUtils)
 local SpawnVisualEffect = require(ReplicatedStorage.Common.Modules.GameUtils.SpawnVisualEffect)
+local LootRevealGui = require(ReplicatedStorage.Common.Components.GUIs.LootRevealGui)
 
 local Player = Players.LocalPlayer
 local Keyboard = Input.Keyboard.new()
@@ -50,13 +50,11 @@ function TreasureClient:Construct()
 
 	self._InputTrove = self._Trove:Extend()
 	self._GrabTrove = self._Trove:Extend()
-
-	-- New: Specific trove for buoyancy to prevent conflicts with GrabTrove
 	self._BuoyancyTrove = self._Trove:Extend()
 
 	self._lastDropTime = 0
 	self._lastHitTime = 0
-	self._lastGrabTime = 0 -- NEW: Track when we last grabbed the item
+	self._lastGrabTime = 0
 	self._Claimed = false
 
 	self.GrabSound = GetAssetByName("ChestPickup")
@@ -107,6 +105,11 @@ function TreasureClient:Stop()
 end
 
 function TreasureClient:_UpdateState()
+	if self._Claimed then
+		self._GrabProximityPrompt.Enabled = false
+		return
+	end
+
 	local holderName = self._AttachedPlayerName:Get()
 	local lockedPlayer = self._LockedPlayer:Get()
 
@@ -136,16 +139,13 @@ function TreasureClient:_UpdateState()
 			end
 		end))
 	else
-		-- If we aren't holding it, ensure physics are detached
 		if self.Instance.PrimaryPart then
 			TreasureUtils.Detach(self.Instance.PrimaryPart)
 		end
 
-		-- Only clean the GrabTrove (ropes/proxies) if we truly lost ownership/lock
-		-- This prevents fighting with _Release
 		if not isLockedByMe then
 			self._GrabTrove:Clean()
-			self._BuoyancyTrove:Clean() -- Clean buoyancy only when we lose the lock
+			self._BuoyancyTrove:Clean()
 		end
 	end
 end
@@ -158,8 +158,6 @@ function TreasureClient:_Grab()
 	end
 
 	self._GrabProximityPrompt.Enabled = false
-
-	-- Clean up any active buoyancy sinking immediately
 	self._BuoyancyTrove:Clean()
 	self._GrabTrove:Clean()
 
@@ -176,7 +174,6 @@ function TreasureClient:_Grab()
 	primaryPart.AssemblyLinearVelocity = Vector3.zero
 	primaryPart.AssemblyAngularVelocity = Vector3.zero
 
-	-- 1. Create the Client-Side Proxy Rig
 	local proxyPart, charAtt = TreasureUtils.CreateProxyRig(Player.Character, primaryPart)
 
 	if proxyPart then
@@ -186,7 +183,6 @@ function TreasureClient:_Grab()
 		self._GrabTrove:Add(charAtt)
 	end
 
-	-- 2. Pre-Response: Force CFrame locally for instant feedback
 	local preGrabTrove = self._GrabTrove:Extend()
 	if proxyPart then
 		preGrabTrove:Add(RunService.RenderStepped:Connect(function()
@@ -196,9 +192,7 @@ function TreasureClient:_Grab()
 		end))
 	end
 
-	-- 3. Request Grab from Server
 	self._CommObject:Grab():andThen(function(success)
-		-- Stop forcing CFrame, let Physics take over
 		preGrabTrove:Clean()
 
 		if not success then
@@ -206,9 +200,8 @@ function TreasureClient:_Grab()
 			return
 		end
 
-		-- 4. Server gave ownership. Apply Constraints.
 		if self.Instance.PrimaryPart and proxyPart then
-			self._lastGrabTime = os.clock() -- NEW: Mark exact time we grabbed it
+			self._lastGrabTime = os.clock()
 			TreasureUtils.Attach(self.Instance.PrimaryPart, Player.Character, proxyPart)
 			self:_SetupCollisionDrop()
 		end
@@ -217,7 +210,7 @@ end
 
 function TreasureClient:_SetupBounceSounds(rootPart, trove)
 	trove:Add(rootPart.Touched:Connect(function(hit)
-		if self._AttachedPlayerName:Get() ~= nil then
+		if self._AttachedPlayerName:Get() ~= nil or self._Claimed then
 			return
 		end
 		if hit:IsDescendantOf(Player.Character) then
@@ -248,16 +241,8 @@ function TreasureClient:_SetupCollisionDrop()
 		return
 	end
 
-	-- Add the connection to GrabTrove so it disconnects automatically when we drop it
 	self._GrabTrove:Add(primaryPart.Touched:Connect(function(hit)
-		-- NEW: Grace Period Check
-		-- If less than 1 second has passed since we grabbed it, ignore collisions
 		if os.clock() - self._lastGrabTime < 1.0 then
-			return
-		end
-
-		if CollectionService:HasTag(hit, "TreasureDeposit") then
-			self:Claim()
 			return
 		end
 
@@ -270,31 +255,26 @@ function TreasureClient:_SetupCollisionDrop()
 			return
 		end
 
-		if hit:IsDescendantOf(self.Instance) then
+		if hit:IsDescendantOf(self.Instance) or hit:IsDescendantOf(Player.Character) then
 			return
 		end
 
-		if hit:IsDescendantOf(Player.Character) then
+		if hit.Name == "CarryProxyPart" or hit.Name == "BuoyancyProxy" then
 			return
 		end
 
-		if hit.Name == "CarryProxyPart" then
-			return
-		end
-
-		if hit.Name == "BuoyancyProxy" then
-			return
-		end
-
-		print("Treasure collided with:", hit.Name, "Dropping!")
 		self:Release()
 	end))
 end
 
 function TreasureClient:Release()
+	if self._Claimed then
+		return
+	end
+
 	self._InputTrove:Clean()
-	self._GrabTrove:Clean() -- Cleans constraints, ropes, and the Touched event
-	self._BuoyancyTrove:Clean() -- Clean any old buoyancy before starting new
+	self._GrabTrove:Clean()
+	self._BuoyancyTrove:Clean()
 
 	DropSound:Play()
 
@@ -303,22 +283,17 @@ function TreasureClient:Release()
 	if part then
 		TreasureUtils.Detach(part)
 
-		-- Slow it down
 		local currentVel = part.AssemblyLinearVelocity
 		part.AssemblyLinearVelocity = Vector3.new(currentVel.X * 0.2, math.min(currentVel.Y, 0), currentVel.Z * 0.2)
 		part.AssemblyAngularVelocity = part.AssemblyAngularVelocity * 0.1
 
-		-- FIX 2: Buoyancy Logic
-		-- Removed duration (previously 2) so it persists until Grab or Lock Loss
 		local buoyancy = TreasureUtils.ApplyBuoyancy(part, 0.9)
 		self._BuoyancyTrove:Add(buoyancy)
 	end
 
 	self._lastDropTime = os.clock()
-	self:_UpdateState() -- Prompt is now disabled (Cooldown)
+	self:_UpdateState()
 
-	-- FIX 3: Re-enable Prompt
-	-- Wait 2 seconds, then update state again to re-enable prompt
 	self._Trove:Add(task.delay(2.1, function()
 		self:_UpdateState()
 	end))
@@ -326,26 +301,96 @@ function TreasureClient:Release()
 	self._CommObject:Drop()
 end
 
-function TreasureClient:Claim()
-	if not self._Claimed then
-		self._Claimed = true
+function TreasureClient:Claim(depositInstance)
+	if self._Claimed then
+		return
+	end
+	self._Claimed = true
+
+	-- 1. Detach from player immediately
+	self._InputTrove:Clean()
+	self._GrabTrove:Clean()
+	self._BuoyancyTrove:Clean()
+
+	-- Ensure global hold state is cleared so player can act immediately
+	if TreasureClient.HoldingTreasure:Get() == self then
+		TreasureClient.HoldingTreasure:Set(nil)
+	end
+
+	-- 2. Setup Animation
+	local primaryPart = self.Instance.PrimaryPart
+	if primaryPart and depositInstance then
+		TreasureUtils.Detach(primaryPart)
+		primaryPart.Anchored = true
+		primaryPart.CanCollide = false
+
+		-- Play sound if you have a specific success sound, otherwise DropSound works
+		if self.GrabSound then
+			self.GrabSound:Play()
+		end
+
+		local startCFrame = self.Instance:GetPivot()
+		local targetCFrame = depositInstance.CFrame
+		local startScale = self.Instance:GetScale()
+
+		local duration = 0.5
+		local startTime = os.clock()
+
+		-- 3. Animate Loop
+		-- Using task.spawn so we don't yield the main thread logic
+		task.spawn(function()
+			while true do
+				local elapsed = os.clock() - startTime
+				local alpha = math.clamp(elapsed / duration, 0, 1)
+
+				-- Easing: Quad In (Start slow, end fast - nice for "sucking" effect)
+				local ease = alpha * alpha
+
+				-- Interpolate Position
+				local currentCF = startCFrame:Lerp(targetCFrame, ease)
+
+				-- Add Spin (2 full rotations)
+				currentCF = currentCF * CFrame.Angles(0, math.rad(360 * 2 * ease), 0)
+
+				if self.Instance and self.Instance.PrimaryPart then
+					self.Instance:PivotTo(currentCF)
+					-- Shrink to 0.1 scale
+					self.Instance:ScaleTo(startScale * (1 - (ease * 0.9)))
+				else
+					break
+				end
+
+				if alpha >= 1 then
+					break
+				end
+
+				RunService.RenderStepped:Wait()
+			end
+
+			-- 4. Destroy after animation
+			if self.Instance then
+				self.Instance:Destroy()
+			end
+
+			-- 5. Network & UI (Moved here so it doesn't destroy the part server-side too early)
+			self._CommObject:Claim()
+			local loot = TreasureUtils.GetLoot(self)
+			LootRevealGui.DisplayLoot(loot)
+		end)
+	else
+		-- Fallback if parts missing
 		self.Instance:Destroy()
 		self._CommObject:Claim()
-
-		LootDisplayGui.DisplayLoot({
-			"Necklace",
-			"Rock",
-			"Yoyo",
-			"Plate",
-			"Necklace",
-			"Rock",
-		})
+		local loot = TreasureUtils.GetLoot(self)
+		LootRevealGui.DisplayLoot(loot)
 	end
 end
 
 function TreasureClient:Break()
 	BreakSound:Play()
-	SpawnVisualEffect.WoodChips(self.Instance.PrimaryPart.Position, Color3.new(0.403921, 0.243137, 0.121568))
+	if self.Instance.PrimaryPart then
+		SpawnVisualEffect.WoodChips(self.Instance.PrimaryPart.Position, Color3.new(0.403921, 0.243137, 0.121568))
+	end
 	self.Instance:Destroy()
 	self._CommObject:Break()
 end

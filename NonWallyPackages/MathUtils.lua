@@ -70,8 +70,10 @@ function MathUtils.RollDice(probability: number, resolution: number?, seed: numb
 	return result
 end
 
-function MathUtils.GetRandomFromList(list)
-	return list[math.random(#list)]
+function MathUtils.GetRandomFromList(list, seed: number?)
+	local rand = Random.new(seed)
+
+	return list[rand:NextInteger(1, #list)]
 end
 
 function MathUtils.GetRandomSeed()

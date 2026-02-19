@@ -3,6 +3,9 @@ local RunService = game:GetService("RunService")
 
 local World2DUtils = require(ReplicatedStorage.Common.Modules.GameUtils.World2DUtils)
 local Trove = require(ReplicatedStorage.Packages.Trove)
+local MathUtils = require(ReplicatedStorage.NonWallyPackages.MathUtils)
+local LootTable = require(ReplicatedStorage.Common.GameInfo.LootTable)
+local TableUtil = require(ReplicatedStorage.Packages.TableUtil)
 
 local TreasureUtils = {}
 
@@ -357,6 +360,21 @@ function TreasureUtils.ApplyBuoyancy(part: BasePart, strength: number, duration:
 	end
 
 	return trove
+end
+
+function TreasureUtils.GetLoot(self)
+	local seed = self.Instance:GetAttribute("RandomSeed")
+
+	local possibleLoots = TableUtil.Keys(LootTable)
+
+	local lootList = {}
+
+	for _ = 1, 5 do
+		table.insert(lootList, MathUtils.GetRandomFromList(possibleLoots, seed))
+		seed += 1
+	end
+
+	return lootList
 end
 
 return TreasureUtils
