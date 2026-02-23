@@ -49,6 +49,8 @@ function LootRevealGui:Construct()
 	if self._ListLayout then
 		self._ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	end
+
+	gui.Enabled = true
 end
 
 function LootRevealGui:Start()
