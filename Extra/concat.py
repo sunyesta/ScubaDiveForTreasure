@@ -145,7 +145,9 @@ if __name__ == "__main__":
         # r"src/ReplicatedStorage/Components/Models/Treasure.lua",
         # r"src/ServerStorage/Components/Models/Treasure.lua",
         # r"src/ReplicatedStorage/Modules/ComponentUtils/TreasureUtils.lua",
-        r"src/ReplicatedStorage/VSCodeStudioPlugins/SmoothieMoveTools",
+        # r"src/ReplicatedStorage/VSCodeStudioPlugins/SmoothieMoveTools",
+        # r"C:\Users\Mary\Documents\roblox game dev\ScubaDiveForTreasure\NonWallyPackages\Cinemachine",
+        r"src\ReplicatedStorage\VSCodeStudioPlugins\SmoothieMoveTools2",
     ]
 
     # 2. Define your output file
@@ -153,7 +155,9 @@ if __name__ == "__main__":
 
     # 3. Define blacklist patterns (glob style)
     # Common examples: "*.log", ".git", "node_modules", "__pycache__"
-    black_list = [".git", "__pycache__", "*.pyc"]
+    black_list = [
+        r"src\ReplicatedStorage\VSCodeStudioPlugins\SmoothieMoveTools2\Trove.lua"
+    ]
 
     # Ensure output directory exists before running
     output_dir = os.path.dirname(out_file)

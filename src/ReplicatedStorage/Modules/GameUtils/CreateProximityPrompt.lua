@@ -1,4 +1,4 @@
-return function(instance, message)
+return function(instance, message, distance)
 	-- creates a proximity prompt with the letter E
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.ActionText = message -- The text displayed to the player (e.g., "Open")
@@ -7,5 +7,9 @@ return function(instance, message)
 	prompt.RequiresLineOfSight = false
 	prompt:AddTag("ProximityPrompt")
 	prompt:SetAttribute("ProxEnabled", true)
+
+	if distance then
+		prompt.MaxIndicatorDistance = distance
+	end
 	return prompt
 end

@@ -1,6 +1,9 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MathUtils = require(script.Parent.Parent.Utils.MathUtils)
 local Constants = require(script.Parent.Parent.Utils.Constants)
 local CameraState = require(script.Parent.CameraState)
+local Trove = require(ReplicatedStorage.Packages.Trove)
+local Property = require(ReplicatedStorage.NonWallyPackages.Property)
 
 -------------------------------------------------------------------------------
 -- VIRTUAL CAMERA
@@ -22,6 +25,11 @@ function VirtualCamera.new(name)
 
 	-- Internal State
 	self.State = CameraState.new()
+
+	-- Setup Troves
+	self._trove = Trove.new()
+	self._IsActive = self._trove:Add(Property.new(false))
+
 	return self
 end
 
@@ -58,6 +66,18 @@ function VirtualCamera:Destroy()
 	if self.Aim and self.Aim.Destroy then
 		self.Aim:Destroy()
 	end
+
+	-- Destroys the base trove, which also permanently destroys the ActiveTrove
+	self._trove:Destroy()
+end
+
+function VirtualCamera:Observe(callback)
+	return self._IsActive:Observe(function(isActive)
+		if isActive then
+			local observerTrove = self._trove:Extend()
+			callback(observerTrove)
+		end
+	end)
 end
 
 return VirtualCamera

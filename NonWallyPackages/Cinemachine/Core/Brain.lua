@@ -70,12 +70,15 @@ function Brain:CutTo(newCam)
 		self.IsBlending = true
 		self.BlendDuration = self.DefaultBlendTime
 		self.BlendTimer = 0
+
+		self.ActiveVirtualCamera._IsActive:Set(false)
 	else
 		-- First camera activation, instant cut
 		self.IsBlending = false
 	end
 
 	self.ActiveVirtualCamera = newCam
+	self.ActiveVirtualCamera._IsActive:Set(true)
 end
 
 function Brain:Update(dt)

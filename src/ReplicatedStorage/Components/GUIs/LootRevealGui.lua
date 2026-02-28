@@ -8,16 +8,17 @@ local Component = require(ReplicatedStorage.Packages.Component)
 local Trove = require(ReplicatedStorage.Packages.Trove)
 local LootTable = require(ReplicatedStorage.Common.GameInfo.LootTable)
 local SoundUtils = require(ReplicatedStorage.NonWallyPackages.SoundUtils)
--- Assuming LootTable is a module returning the table structure from your example
--- local LootTable = require(ReplicatedStorage.Common.GameInfo.LootTable)
 
 --Constants
 local REVEAL_SPEED = 0.45
 local ITEM_ANIM_SPEED = 0.6
 local WINDOW_ANIM_SPEED = 0.8
+local COMPLETION_RIPPLE_SPEED = 0.05 -- NEW: Speed between each item bouncing at the end
 
+-- Sounds
 local SoundPop = SoundUtils.MakeSound("rbxassetid://4612375233", script)
-local SoundComplete = SoundUtils.MakeSound("rbxassetid://12222200", script)
+local SoundComplete = SoundUtils.MakeSound("rbxassetid://93939855588300", script)
+local SoundOpen = SoundUtils.MakeSound("rbxassetid://12222200", script)
 
 local Player = Players.LocalPlayer
 
@@ -33,7 +34,6 @@ function LootRevealGui:Construct()
 	self._OpenTrove = self._Trove:Extend()
 
 	-- Cache UI References
-	-- Assuming the Instance tagged is the ScreenGui or the Main Frame
 	local gui = self.Instance
 	self._MainFrame = gui:WaitForChild("Container")
 	self._ScrollingFrame = self._MainFrame:WaitForChild("ScrollingFrame")
@@ -55,8 +55,6 @@ end
 
 function LootRevealGui:Start()
 	-- Optional: Listen for a RemoteEvent here to trigger the reveal automatically
-	-- Example:
-	-- self._Trove:Connect(Remotes.Client:OnEvent("LootDrop"), function(items) self:Reveal(items) end)
 end
 
 function LootRevealGui:Stop()
@@ -65,8 +63,6 @@ end
 
 -- // PUBLIC API \\ --
 
--- Call this to start the sequence
--- Usage: LootRevealGui.DisplayLoot({"Rock", "Necklace"})
 function LootRevealGui.DisplayLoot(itemsToGive)
 	local self = LootRevealGui:GetAll()[1]
 	if not self then
@@ -91,7 +87,6 @@ end
 
 -- // INTERNAL METHODS \\ --
 
---! Yeilds
 function LootRevealGui:_AnimateSequence(itemsToGive)
 	-- 1. Reset UI Container
 	self:_CleanContainer()
@@ -103,6 +98,9 @@ function LootRevealGui:_AnimateSequence(itemsToGive)
 
 	local openInfo = TweenInfo.new(WINDOW_ANIM_SPEED, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out)
 	TweenService:Create(self._MainFrame, openInfo, { Size = self._DefaultSize }):Play()
+
+	-- Play the open sound effect precisely as the GUI starts tweening
+	SoundOpen:Play()
 
 	-- Track this open session
 	self._IsOpen = true
@@ -118,7 +116,7 @@ function LootRevealGui:_AnimateSequence(itemsToGive)
 			break
 		end
 
-		local data = LootTable[itemKey] -- Or LootTable[itemKey]
+		local data = LootTable[itemKey]
 		if not data then
 			continue
 		end
@@ -130,7 +128,51 @@ function LootRevealGui:_AnimateSequence(itemsToGive)
 	-- 4. Finish
 	if self._IsOpen then
 		SoundComplete:Play()
+		self:_PlayCompletionAnimation() -- NEW: Trigger the celebratory animation
 	end
+end
+
+-- NEW: The celebratory completion animation logic
+function LootRevealGui:_PlayCompletionAnimation()
+	-- Create a bouncy "pop" effect for the entire main container
+	-- We multiply the default scale/offset by 1.05 for a 5% size increase
+	local enlargedSize = UDim2.new(
+		self._DefaultSize.X.Scale * 1.05,
+		self._DefaultSize.X.Offset,
+		self._DefaultSize.Y.Scale * 1.05,
+		self._DefaultSize.Y.Offset
+	)
+
+	-- The 'true' at the end of TweenInfo makes it reverse back to normal automatically!
+	local mainPopInfo = TweenInfo.new(0.15, Enum.EasingStyle.Sine, Enum.EasingDirection.Out, 0, true)
+	TweenService:Create(self._MainFrame, mainPopInfo, { Size = enlargedSize, Rotation = 2 }):Play()
+
+	-- Send a ripple animation through the revealed items
+	task.spawn(function()
+		for _, child in ipairs(self._ScrollingFrame:GetChildren()) do
+			if not self._IsOpen then
+				break
+			end -- Stop if they close it during the ripple
+
+			-- Make sure we are only grabbing our item holders
+			if child:IsA("Frame") and string.sub(child.Name, 1, 7) == "Holder_" then
+				local itemFrame = child:FindFirstChildWhichIsA("Frame")
+				if itemFrame then
+					-- Make the individual item pop out 15% larger and snap back
+					local itemPopInfo = TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, true)
+					TweenService:Create(itemFrame, itemPopInfo, { Size = UDim2.fromScale(1.15, 1.15) }):Play()
+
+					-- Wait slightly before bouncing the next one
+					task.wait(COMPLETION_RIPPLE_SPEED)
+				end
+			end
+		end
+
+		-- Just to be perfectly safe, ensure the main frame resets rotation
+		if self._IsOpen then
+			TweenService:Create(self._MainFrame, TweenInfo.new(0.1), { Rotation = 0 }):Play()
+		end
+	end)
 end
 
 function LootRevealGui:_SpawnItem(data, index)
@@ -177,6 +219,9 @@ end
 
 function LootRevealGui:_CloseInternal()
 	self._IsOpen = false
+
+	SoundOpen:Play()
+
 	-- Animate out
 	local closeInfo = TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.In)
 	local tween = TweenService:Create(self._MainFrame, closeInfo, { Size = UDim2.fromScale(0, 0) })

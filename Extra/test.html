@@ -1,0 +1,432 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { 
+  Move, Rotate3D, Scaling, 
+  Globe, Box, Monitor, 
+  AlignCenter, Crosshair, 
+  X, Grid3X3, Layers,
+  ChevronLeft, ChevronRight,
+  Settings2
+} from 'lucide-react';
+
+// --- Utility functions for Color Conversion ---
+const hsvToRgb = (h, s, v) => {
+  s /= 100;
+  v /= 100;
+  let f = (n, k = (n + h / 60) % 6) => v - v * s * Math.max(Math.min(k, 4 - k, 1), 0);
+  return [Math.round(f(5) * 255), Math.round(f(3) * 255), Math.round(f(1) * 255)];
+};
+
+const rgbToHsv = (r, g, b) => {
+  r /= 255; g /= 255; b /= 255;
+  let v = Math.max(r, g, b), c = v - Math.min(r, g, b);
+  let h = c && ((v === r) ? (g - b) / c : ((v === g) ? 2 + (b - r) / c : 4 + (r - g) / c)); 
+  return [Math.round(60 * (h < 0 ? h + 6 : h)), Math.round(v && c / v * 100), Math.round(v * 100)];
+};
+
+// --- Reusable Components ---
+
+const SectionHeader = ({ title }) => (
+  <h2 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3 px-1 mt-6">
+    {title}
+  </h2>
+);
+
+const SegmentedControl = ({ options, value, onChange }) => {
+  return (
+    <div className="flex bg-neutral-900 p-1 rounded-xl border border-neutral-800">
+      {options.map((opt) => {
+        const isActive = value === opt.value;
+        const Icon = opt.icon;
+        return (
+          <button
+            key={opt.value}
+            onClick={() => onChange(opt.value)}
+            className={`flex-1 flex flex-col items-center justify-center py-2 px-1 rounded-lg text-xs font-medium transition-all duration-200 ${
+              isActive 
+                ? 'bg-neutral-700 text-white shadow-sm' 
+                : 'text-neutral-500 hover:text-neutral-300'
+            }`}
+          >
+            {Icon && <Icon size={16} className="mb-1" />}
+            <span>{opt.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
+const ScrubbableInput = ({ label, value, onChange, min = 0, max = 100, step = 1 }) => {
+  const [isDragging, setIsDragging] = useState(false);
+  const [startPos, setStartPos] = useState(0);
+  const [startValue, setStartValue] = useState(value);
+  const inputRef = useRef(null);
+
+  const handlePointerDown = (e) => {
+    setIsDragging(true);
+    setStartPos(e.clientX || (e.touches && e.touches[0].clientX));
+    setStartValue(value);
+    document.body.style.cursor = 'ew-resize';
+  };
+
+  useEffect(() => {
+    const handlePointerMove = (e) => {
+      if (!isDragging) return;
+      
+      const currentPos = e.clientX || (e.touches && e.touches[0].clientX);
+      if (currentPos === undefined) return;
+
+      const delta = currentPos - startPos;
+      const sensitivity = 0.5; // adjust for faster/slower scrubbing
+      
+      let newValue = startValue + (delta * sensitivity * step);
+      
+      // Snap to step and clamp
+      newValue = Math.round(newValue / step) * step;
+      newValue = Math.max(min, Math.min(max, newValue));
+      
+      onChange(Number(newValue.toFixed(2))); // avoid floating point weirdness
+    };
+
+    const handlePointerUp = () => {
+      setIsDragging(false);
+      document.body.style.cursor = '';
+    };
+
+    if (isDragging) {
+      window.addEventListener('mousemove', handlePointerMove);
+      window.addEventListener('mouseup', handlePointerUp);
+      window.addEventListener('touchmove', handlePointerMove, { passive: false });
+      window.addEventListener('touchend', handlePointerUp);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handlePointerMove);
+      window.removeEventListener('mouseup', handlePointerUp);
+      window.removeEventListener('touchmove', handlePointerMove);
+      window.removeEventListener('touchend', handlePointerUp);
+    };
+  }, [isDragging, startPos, startValue, step, min, max, onChange]);
+
+  const handleInputChange = (e) => {
+    let val = parseFloat(e.target.value);
+    if (!isNaN(val)) {
+      val = Math.max(min, Math.min(max, val));
+      onChange(val);
+    }
+  };
+
+  const increment = () => onChange(Math.min(max, value + step));
+  const decrement = () => onChange(Math.max(min, value - step));
+
+  return (
+    <div className="flex items-center justify-between bg-neutral-900 border border-neutral-800 rounded-xl p-1 overflow-hidden">
+      {/* Scrubbable Label Area */}
+      <div 
+        className="flex-1 py-3 px-3 cursor-ew-resize select-none text-neutral-400 font-medium text-sm flex items-center hover:bg-neutral-800 transition-colors rounded-lg"
+        onMouseDown={handlePointerDown}
+        onTouchStart={handlePointerDown}
+      >
+        <span className="mr-2 text-neutral-500 font-bold tracking-widest text-xs">↔</span>
+        {label}
+      </div>
+
+      {/* Input Area */}
+      <div className="flex items-center space-x-1 px-2">
+        <button onClick={decrement} className="p-1.5 text-neutral-500 hover:text-white hover:bg-neutral-800 rounded-md">
+          <ChevronLeft size={16} />
+        </button>
+        <input 
+          ref={inputRef}
+          type="number" 
+          value={value}
+          onChange={handleInputChange}
+          className="w-16 bg-transparent text-white text-center font-medium focus:outline-none focus:ring-1 focus:ring-blue-500 rounded appearance-none"
+          style={{ MozAppearance: 'textfield' }}
+        />
+        <button onClick={increment} className="p-1.5 text-neutral-500 hover:text-white hover:bg-neutral-800 rounded-md">
+          <ChevronRight size={16} />
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const CustomSlider = ({ label, value, min, max, onChange, colorClass, gradient }) => (
+  <div className="flex items-center space-x-4 mb-4">
+    <div className="w-8 text-xs font-semibold text-neutral-400">{label}</div>
+    <div className="flex-1 relative flex items-center h-6">
+      <input 
+        type="range" 
+        min={min} 
+        max={max} 
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className={`w-full h-2 rounded-full appearance-none outline-none z-10 bg-transparent ${colorClass}`}
+        style={{
+          background: gradient || 'var(--track-bg)',
+          '--track-bg': '#262626'
+        }}
+      />
+    </div>
+    <div className="w-12 text-right text-sm font-mono text-neutral-300 bg-neutral-900 py-1 px-2 rounded border border-neutral-800">
+      {value}
+    </div>
+  </div>
+);
+
+// --- Main Application ---
+
+export default function App() {
+  // Transform State
+  const [tool, setTool] = useState('move');
+  const [axis, setAxis] = useState('global');
+  const [origin, setOrigin] = useState('center');
+  const [snapping, setSnapping] = useState('none');
+  const [gridSize, setGridSize] = useState(1.0);
+
+  // Color State
+  const [colorMode, setColorMode] = useState('rgb'); // 'rgb' or 'hsv'
+  const [rgb, setRgb] = useState({ r: 99, g: 102, b: 241 }); // Indigo-500
+  const [hsv, setHsv] = useState({ h: 239, s: 59, v: 95 });
+
+  // Sync colors when RGB changes
+  const handleRgbChange = (channel, val) => {
+    const newRgb = { ...rgb, [channel]: val };
+    setRgb(newRgb);
+    const [h, s, v] = rgbToHsv(newRgb.r, newRgb.g, newRgb.b);
+    setHsv({ h, s, v });
+  };
+
+  // Sync colors when HSV changes
+  const handleHsvChange = (channel, val) => {
+    const newHsv = { ...hsv, [channel]: val };
+    setHsv(newHsv);
+    const [r, g, b] = hsvToRgb(newHsv.h, newHsv.s, newHsv.v);
+    setRgb({ r, g, b });
+  };
+
+  const hexColor = `#${rgb.r.toString(16).padStart(2, '0')}${rgb.g.toString(16).padStart(2, '0')}${rgb.b.toString(16).padStart(2, '0')}`;
+
+  return (
+    <div className="min-h-screen bg-black text-neutral-200 font-sans sm:p-4 md:p-8 flex justify-center">
+      <div className="w-full max-w-md bg-neutral-950 sm:rounded-3xl sm:border border-neutral-800 shadow-2xl overflow-hidden flex flex-col h-[100dvh] sm:h-[850px]">
+        
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-neutral-800 bg-neutral-900/50 backdrop-blur-md sticky top-0 z-20">
+          <div className="flex items-center space-x-2">
+            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-900/50">
+              <Settings2 size={18} className="text-white" />
+            </div>
+            <h1 className="text-base font-bold text-white tracking-wide">Remote UI</h1>
+          </div>
+          <div className="text-xs font-medium px-2 py-1 bg-neutral-800 rounded text-neutral-400">
+            Connected
+          </div>
+        </div>
+
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-6 pb-12 custom-scrollbar">
+          
+          {/* TRANSFORM SECTION */}
+          <section>
+            <SectionHeader title="Transform" />
+            
+            <div className="space-y-4 bg-neutral-900/30 p-3 rounded-2xl border border-neutral-800/50">
+              <div>
+                <div className="text-xs text-neutral-500 mb-2 px-1">Tools</div>
+                <SegmentedControl 
+                  value={tool} 
+                  onChange={setTool}
+                  options={[
+                    { label: 'Move', value: 'move', icon: Move },
+                    { label: 'Rotate', value: 'rotate', icon: Rotate3D },
+                    { label: 'Scale', value: 'scale', icon: Scaling },
+                  ]} 
+                />
+              </div>
+
+              <div>
+                <div className="text-xs text-neutral-500 mb-2 px-1">Axis</div>
+                <SegmentedControl 
+                  value={axis} 
+                  onChange={setAxis}
+                  options={[
+                    { label: 'Global', value: 'global', icon: Globe },
+                    { label: 'Local', value: 'local', icon: Box },
+                    { label: 'View', value: 'view', icon: Monitor },
+                  ]} 
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-xs text-neutral-500 mb-2 px-1">Origin</div>
+                  <SegmentedControl 
+                    value={origin} 
+                    onChange={setOrigin}
+                    options={[
+                      { label: 'Center', value: 'center', icon: AlignCenter },
+                      { label: 'Pivot', value: 'pivot', icon: Crosshair },
+                    ]} 
+                  />
+                </div>
+                <div>
+                  <div className="text-xs text-neutral-500 mb-2 px-1">Snapping</div>
+                  <SegmentedControl 
+                    value={snapping} 
+                    onChange={setSnapping}
+                    options={[
+                      { label: 'None', value: 'none', icon: X },
+                      { label: 'Grid', value: 'grid', icon: Grid3X3 },
+                      { label: 'Surface', value: 'surface', icon: Layers },
+                    ]} 
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <ScrubbableInput 
+                  label="Grid Size" 
+                  value={gridSize} 
+                  onChange={setGridSize} 
+                  step={0.1}
+                  min={0.1}
+                  max={100}
+                />
+              </div>
+            </div>
+          </section>
+
+          {/* COLORING SECTION */}
+          <section>
+            <div className="flex items-center justify-between mt-6 mb-3 px-1">
+              <h2 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
+                Coloring
+              </h2>
+              {/* Color Mode Toggle */}
+              <div className="flex bg-neutral-900 rounded-lg p-0.5 border border-neutral-800">
+                <button 
+                  onClick={() => setColorMode('rgb')}
+                  className={`px-3 py-1 text-xs font-medium rounded-md ${colorMode === 'rgb' ? 'bg-neutral-700 text-white' : 'text-neutral-500'}`}
+                >
+                  RGB
+                </button>
+                <button 
+                  onClick={() => setColorMode('hsv')}
+                  className={`px-3 py-1 text-xs font-medium rounded-md ${colorMode === 'hsv' ? 'bg-neutral-700 text-white' : 'text-neutral-500'}`}
+                >
+                  HSV
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-neutral-900/30 p-4 rounded-2xl border border-neutral-800/50">
+              
+              {/* Color Preview */}
+              <div className="flex items-center space-x-4 mb-6">
+                <div 
+                  className="w-16 h-16 rounded-2xl shadow-inner border border-white/10"
+                  style={{ backgroundColor: hexColor }}
+                />
+                <div>
+                  <div className="text-white font-mono text-sm uppercase tracking-wider">{hexColor}</div>
+                  <div className="text-neutral-500 text-xs mt-1">
+                    {colorMode === 'rgb' 
+                      ? `R:${rgb.r} G:${rgb.g} B:${rgb.b}`
+                      : `H:${hsv.h}° S:${hsv.s}% V:${hsv.v}%`
+                    }
+                  </div>
+                </div>
+              </div>
+
+              {/* Sliders */}
+              <div className="space-y-2">
+                {colorMode === 'rgb' ? (
+                  <>
+                    <CustomSlider 
+                      label="R" value={rgb.r} min={0} max={255} 
+                      onChange={(v) => handleRgbChange('r', v)}
+                      gradient={`linear-gradient(to right, #000000, #ff0000)`}
+                    />
+                    <CustomSlider 
+                      label="G" value={rgb.g} min={0} max={255} 
+                      onChange={(v) => handleRgbChange('g', v)}
+                      gradient={`linear-gradient(to right, #000000, #00ff00)`}
+                    />
+                    <CustomSlider 
+                      label="B" value={rgb.b} min={0} max={255} 
+                      onChange={(v) => handleRgbChange('b', v)}
+                      gradient={`linear-gradient(to right, #000000, #0000ff)`}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <CustomSlider 
+                      label="H" value={hsv.h} min={0} max={360} 
+                      onChange={(v) => handleHsvChange('h', v)}
+                      gradient={`linear-gradient(to right, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%)`}
+                    />
+                    <CustomSlider 
+                      label="S" value={hsv.s} min={0} max={100} 
+                      onChange={(v) => handleHsvChange('s', v)}
+                      gradient={`linear-gradient(to right, #808080, ${hexColor})`}
+                    />
+                    <CustomSlider 
+                      label="V" value={hsv.v} min={0} max={100} 
+                      onChange={(v) => handleHsvChange('v', v)}
+                      gradient={`linear-gradient(to right, #000000, ${hexColor})`}
+                    />
+                  </>
+                )}
+              </div>
+            </div>
+          </section>
+
+        </div>
+      </div>
+      
+      <style dangerouslySetInnerHTML={{__html: `
+        /* Hide default number input arrows */
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { 
+          -webkit-appearance: none; 
+          margin: 0; 
+        }
+        
+        /* Custom scrollbar for webkit */
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #3f3f46;
+          border-radius: 4px;
+        }
+        
+        /* Custom Range Slider Thumb */
+        input[type=range]::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          height: 16px;
+          width: 16px;
+          border-radius: 50%;
+          background: white;
+          border: 2px solid #171717;
+          box-shadow: 0 0 4px rgba(0,0,0,0.5);
+          cursor: pointer;
+        }
+        input[type=range]::-moz-range-thumb {
+          height: 16px;
+          width: 16px;
+          border-radius: 50%;
+          background: white;
+          border: 2px solid #171717;
+          box-shadow: 0 0 4px rgba(0,0,0,0.5);
+          cursor: pointer;
+        }
+      `}} />
+    </div>
+  );
+}

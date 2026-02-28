@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SoundService = game:GetService("SoundService")
 local Cinemachine = require(ReplicatedStorage.NonWallyPackages.Cinemachine)
 local PlayerUtils = require(ReplicatedStorage.NonWallyPackages.PlayerUtils)
 local GameEnums = require(ReplicatedStorage.Common.GameInfo.GameEnums)
@@ -59,14 +60,21 @@ function PlayerCamera2D()
 
 	Cinemachine.Brain:Register(playerCamera)
 
-	PlayerUtils.ObserveCharacterAdded(Player, function(character)
-		-- Track HumanoidRootPart for 2D to avoid jitter from animation (Head bobbing)
-		local rootPart = character:WaitForChild("HumanoidRootPart")
-		playerCamera.Follow = rootPart
+	playerCamera:Observe(function(activeTrove)
+		activeTrove:Add(PlayerUtils.ObserveCharacterAdded(Player, function(character)
+			-- Track HumanoidRootPart for 2D to avoid jitter from animation (Head bobbing)
+			local rootPart = character:WaitForChild("HumanoidRootPart")
+			playerCamera.Follow = rootPart
 
-		-- NOTE: We purposefully do NOT set playerCamera.LookAt.
-		-- This ensures the camera maintains its fixed 2D orientation
-		-- instead of rotating to look at the player.
+			SoundService:SetListener(Enum.ListenerType.ObjectPosition, rootPart)
+			activeTrove:Add(function()
+				SoundService:SetListener(Enum.ListenerType.Camera)
+			end)
+
+			-- NOTE: We purposefully do NOT set playerCamera.LookAt.
+			-- This ensures the camera maintains its fixed 2D orientation
+			-- instead of rotating to look at the player.
+		end))
 	end)
 
 	return playerCamera

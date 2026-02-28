@@ -45,7 +45,7 @@ function TreasureClient:Construct()
 
 	self._LockedPlayer = self._Comm:GetProperty("LockedPlayer")
 
-	self._GrabProximityPrompt = CreateProximityPrompt(self.Instance, "Grab")
+	self._GrabProximityPrompt = CreateProximityPrompt(self.Instance, "Grab", 2)
 	self._AttachedPlayerName = Property.BindToAttribute(self.Instance, "_AttachedPlayerName", nil)
 
 	self._InputTrove = self._Trove:Extend()
@@ -58,6 +58,7 @@ function TreasureClient:Construct()
 	self._Claimed = false
 
 	self.GrabSound = GetAssetByName("ChestPickup")
+	self.TreasureClaimSound = GetAssetByName("TreasureClaimSound")
 end
 
 function TreasureClient:Start()
@@ -325,9 +326,7 @@ function TreasureClient:Claim(depositInstance)
 		primaryPart.CanCollide = false
 
 		-- Play sound if you have a specific success sound, otherwise DropSound works
-		if self.GrabSound then
-			self.GrabSound:Play()
-		end
+		self.TreasureClaimSound:Play()
 
 		local startCFrame = self.Instance:GetPivot()
 		local targetCFrame = depositInstance.CFrame
