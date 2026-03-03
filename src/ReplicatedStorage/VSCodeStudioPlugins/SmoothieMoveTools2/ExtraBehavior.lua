@@ -1,5 +1,6 @@
 local UserInputService = game:GetService("UserInputService")
 local Selection = game:GetService("Selection")
+local ReplicatedStorage = game:GetService("ReplicatedStorage") -- Added Service
 
 local Props = require(script.Parent.Props)
 local Enums = require(script.Parent.Enums)
@@ -15,6 +16,17 @@ function ExtraBehavior.Init(plugin, pluginTrove)
 	local isCtrlHeld = false
 	local preCtrlSnappingState = false
 
+	-- Helper to get (or create) the temporary folder
+	local function getHiddenFolder()
+		local folder = ReplicatedStorage:FindFirstChild("SmoothieMoveTools_HiddenParts")
+		if not folder then
+			folder = Instance.new("Folder")
+			folder.Name = "SmoothieMoveTools_HiddenParts"
+			folder.Parent = ReplicatedStorage
+		end
+		return folder
+	end
+
 	-- Helper function to restore all hidden objects back to their parents
 	local function restoreHiddenObjects()
 		for obj, originalParent in pairs(hiddenObjects) do
@@ -25,6 +37,12 @@ function ExtraBehavior.Init(plugin, pluginTrove)
 		end
 		-- Clear the dictionary after restoring
 		table.clear(hiddenObjects)
+
+		-- Clean up: Remove the folder if we are done with it
+		local folder = ReplicatedStorage:FindFirstChild("SmoothieMoveTools_HiddenParts")
+		if folder then
+			folder:Destroy()
+		end
 	end
 
 	-- 1. If the plugin trove is cleaned (plugin deactivated/updated), restore objects automatically!
@@ -56,18 +74,20 @@ function ExtraBehavior.Init(plugin, pluginTrove)
 			else
 				-- Just H was pressed: Hide selected objects
 				local selected = Props.SelectedObjects:Get()
+				local hiddenFolder = getHiddenFolder() -- Get reference to folder
 
 				for _, obj in ipairs(selected) do
 					if obj.Parent ~= nil then
 						-- Save the parent before hiding
 						hiddenObjects[obj] = obj.Parent
-						-- Parent to nil to hide it from the Workspace/Explorer
-						obj.Parent = nil
+
+						-- Parent to the ReplicatedStorage folder instead of nil
+						obj.Parent = hiddenFolder
 					end
 				end
 
 				-- Optional but recommended: Clear the current selection so Roblox Studio
-				-- draggers don't bug out trying to move objects that are parented to nil.
+				-- draggers don't bug out trying to move objects that are parented to nil/storage.
 				Props.SelectedObjects:Set({})
 				Selection:Set({})
 			end

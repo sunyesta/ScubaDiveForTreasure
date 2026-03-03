@@ -9,79 +9,81 @@ local Props = require(script.Parent.Props)
 
 local ColorBehavior = {}
 
+-- Store the main plugin trove so our local tools can access it and bind to its lifecycle
+local moduleTrove: any = nil
+
 -- Initiates the reactive listeners for coloring behavior
-function ColorBehavior.Init(): ()
+function ColorBehavior.Init(plugin: Plugin, pluginTrove: any): ()
+	moduleTrove = pluginTrove
+
 	-- We use a flag to track if we are just syncing the UI vs actually picking a new color
 	local isSyncingColor = false
 
-	-- 1. Observe when the ActivePart changes
-	Props.ActivePart:Observe(function(newActivePart: Instance?)
-		-- We check if it exists and is a BasePart (Part, MeshPart, Wedge, etc.)
+	-- We add a startup flag to prevent the default state from overwriting parts on load
+	local isInitializing = true
+
+	-- 1. Observe when the ActivePart changes and bind it to the main Trove
+	pluginTrove:Add(Props.ActivePart:Observe(function(newActivePart: Instance?)
 		if newActivePart and newActivePart:IsA("BasePart") then
-			-- Sync the ActiveColor state to match the newly selected part
 			isSyncingColor = true
 			Props.ActiveColor:Set(newActivePart.Color)
 			isSyncingColor = false
 		end
-	end)
+	end))
 
-	-- 2. Observe when the ActiveColor changes
-	Props.ActiveColor:Observe(function(newColor: Color3)
-		-- If the color change was triggered by selecting a new part, ignore it!
-		if isSyncingColor then
+	-- 2. Observe when the ActiveColor changes and bind it to the main Trove
+	pluginTrove:Add(Props.ActiveColor:Observe(function(newColor: Color3)
+		if isSyncingColor or isInitializing then
 			return
 		end
 
-		-- Retrieve the current selection of objects instead of just the active part
 		local selectedObjects: { Instance } = Props.SelectedObjects:Get()
 
-		-- Make sure the selection table exists
 		if selectedObjects then
-			-- Loop through every object in the selection
 			for _, object in ipairs(selectedObjects) do
-				-- If the object is a BasePart, update its color to the new selection
 				if object:IsA("BasePart") then
 					object.Color = newColor
 				end
 			end
 		end
-	end)
+	end))
+
+	isInitializing = false
 end
 
 -- Validates that the current selection only contains colorable parts
 function ColorBehavior.ValidateSelectionForColoring(): (boolean, string?)
-	-- Retrieve the current selection from our state manager
 	local selectedObjects: { Instance } = Props.SelectedObjects:Get()
 
-	-- If nothing is selected, we shouldn't consider it a valid selection for coloring
 	if not selectedObjects or #selectedObjects == 0 then
 		return false, "nothing is selected"
 	end
 
-	-- Loop through everything in the selection table
 	for _, object in ipairs(selectedObjects) do
-		-- If any object is NOT a BasePart (e.g., a Model, Folder, or Script), return false
 		if not object:IsA("BasePart") then
 			return false, "you can only color baseparts"
 		end
 	end
 
-	-- If the loop finishes without returning false, all items are valid parts!
 	return true, nil
 end
 
 -- Activates the Eyedropper tool to pick a color from the Workspace
 function ColorBehavior.StartEyedropperTool(plugin: Plugin)
-	-- Save the currently active Studio tool and the current selection
+	assert(moduleTrove, "ColorBehavior.Init() must be called with a Trove before using the Eyedropper tool!")
+
 	local previousTool = plugin:GetSelectedRibbonTool()
 	local originalSelection = Selection:Get()
 	local pickedSuccessfully = false
 
-	-- Activate the plugin to request exclusive mouse control from Studio
 	plugin:Activate(true)
+	UserInputService.MouseIconEnabled = false
 
-	-- Setup Visuals (UI Cursor)
-	local screenGui = Instance.new("ScreenGui")
+	-- Create a sub-trove. If the main plugin closes, this tool sub-trove is destroyed automatically!
+	local toolTrove = moduleTrove:Extend()
+
+	-- Setup Visuals (UI Cursor) bound to the toolTrove
+	local screenGui = toolTrove:Add(Instance.new("ScreenGui"))
 	screenGui.Name = "EyedropperCursorGui"
 	screenGui.Parent = CoreGui
 
@@ -93,138 +95,88 @@ function ColorBehavior.StartEyedropperTool(plugin: Plugin)
 	cursorImage.ScaleType = Enum.ScaleType.Fit
 	cursorImage.Parent = screenGui
 
-	-- Setup Visuals (Highlight)
-	local highlight = Instance.new("Highlight")
+	-- Setup Visuals (Highlight) bound to the toolTrove
+	local highlight = toolTrove:Add(Instance.new("Highlight"))
 	highlight.Name = "EyedropperHighlight"
 	highlight.FillTransparency = 0
 	highlight.OutlineTransparency = 1
 	highlight.Enabled = false
+	highlight.DepthMode = Enum.HighlightDepthMode.Occluded
 	highlight.Parent = CoreGui
 
-	-- Hide the default mouse cursor
-	UserInputService.MouseIconEnabled = false
-
-	-- State tracking for the tool
-	local connections: { RBXScriptConnection } = {}
-	local activeHoverPart: BasePart? = nil
-
-	-- Flag to prevent cleanUp from running multiple times recursively
-	local isCleaningUp = false
-
-	-- Cleanup function to safely exit the tool and restore defaults
-	local function cleanUp()
-		-- Prevent this function from running twice
-		if isCleaningUp then
-			return
-		end
-		isCleaningUp = true
-
-		-- Disconnect events FIRST so restoring the selection doesn't re-trigger SelectionChanged
-		for _, conn in ipairs(connections) do
-			conn:Disconnect()
-		end
-		table.clear(connections)
-
-		if screenGui then
-			screenGui:Destroy()
-		end
-		if highlight then
-			highlight:Destroy()
-		end
-
+	-- Add custom state restoration logic to the Trove.
+	-- This executes safely when toolTrove:Destroy() is called.
+	toolTrove:Add(function()
 		UserInputService.MouseIconEnabled = true
-
-		-- Deactivate the plugin state if it isn't already deactivated
 		plugin:Deactivate()
 
-		-- If the user cancelled (hit Escape), Studio naturally dropped the selection.
-		-- We want to restore what they originally had selected!
 		if not pickedSuccessfully then
 			Selection:Set(originalSelection)
 		end
 
-		-- Restore the tool they had BEFORE clicking the Eyedropper.
 		local currentTool = plugin:GetSelectedRibbonTool()
 		if currentTool == Enum.RibbonTool.Select or currentTool == Enum.RibbonTool.None or pickedSuccessfully then
 			pcall(function()
 				plugin:SelectRibbonTool(previousTool)
 			end)
 		end
-	end
+	end)
+
+	local activeHoverPart: BasePart? = nil
+	local camera = Workspace.CurrentCamera
 
 	-- Update Loop (Hover Logic & Cursor Follow)
-	local camera = Workspace.CurrentCamera
-	table.insert(
-		connections,
-		RunService.RenderStepped:Connect(function()
-			local mouseLocation = UserInputService:GetMouseLocation()
+	-- toolTrove:Connect automatically disconnects the event on cleanup
+	toolTrove:Connect(RunService.RenderStepped, function()
+		local mouseLocation = UserInputService:GetMouseLocation()
+		cursorImage.Position = UDim2.fromOffset(mouseLocation.X + 20, mouseLocation.Y + 20)
 
-			-- Offset by 20 pixels on the bottom right (X + 20, Y + 20)
-			cursorImage.Position = UDim2.fromOffset(mouseLocation.X + 20, mouseLocation.Y + 20)
+		if camera then
+			local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
+			local raycastParams = RaycastParams.new()
+			raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+			raycastParams.FilterDescendantsInstances = { screenGui }
 
-			-- Raycast to find parts under the mouse
-			if camera then
-				local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
-				local raycastParams = RaycastParams.new()
-				raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-				raycastParams.FilterDescendantsInstances = { screenGui }
+			local result = Workspace:Raycast(ray.Origin, ray.Direction * 1000, raycastParams)
 
-				local result = Workspace:Raycast(ray.Origin, ray.Direction * 1000, raycastParams)
-
-				-- Check if we hit a BasePart
-				if result and result.Instance and result.Instance:IsA("BasePart") then
-					activeHoverPart = result.Instance
-					highlight.Adornee = activeHoverPart
-					highlight.FillColor = activeHoverPart.Color
-					highlight.Enabled = true
-				else
-					activeHoverPart = nil
-					highlight.Adornee = nil
-					highlight.Enabled = false
-				end
+			if result and result.Instance and result.Instance:IsA("BasePart") then
+				activeHoverPart = result.Instance
+				highlight.Adornee = activeHoverPart
+				highlight.FillColor = activeHoverPart.Color
+				highlight.Enabled = true
+			else
+				activeHoverPart = nil
+				highlight.Adornee = nil
+				highlight.Enabled = false
 			end
-		end)
-	)
+		end
+	end)
 
 	-- Input Loop (Clicking confirmation)
-	table.insert(
-		connections,
-		UserInputService.InputBegan:Connect(function(input, gameProcessed)
-			if input.UserInputType == Enum.UserInputType.MouseButton1 then
-				-- Selection Confirmation
-				if activeHoverPart then
-					pickedSuccessfully = true
-					local pickedColor = activeHoverPart.Color
+	toolTrove:Connect(UserInputService.InputBegan, function(input, gameProcessed)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			if activeHoverPart then
+				pickedSuccessfully = true
+				Props.ActiveColor:Set(activeHoverPart.Color)
 
-					-- Feed the picked color back into the state
-					Props.ActiveColor:Set(pickedColor)
-
-					-- Disable the tool after picking
-					cleanUp()
-				end
+				-- Destroys the UI, disconnects all events, and runs our custom cleanup function
+				toolTrove:Destroy()
 			end
-		end)
-	)
+		end
+	end)
 
 	-- Detect Escape key by listening for Studio natively clearing the Selection
-	table.insert(
-		connections,
-		Selection.SelectionChanged:Connect(function()
-			local currentSelection = Selection:Get()
-			-- If the selection becomes completely empty, it means the user hit Escape or clicked into the void
-			if #currentSelection == 0 then
-				cleanUp()
-			end
-		end)
-	)
+	toolTrove:Connect(Selection.SelectionChanged, function()
+		local currentSelection = Selection:Get()
+		if #currentSelection == 0 then
+			toolTrove:Destroy()
+		end
+	end)
 
-	-- Keep Deactivation as a fallback just in case the user selects another plugin entirely
-	table.insert(
-		connections,
-		plugin.Deactivation:Connect(function()
-			cleanUp()
-		end)
-	)
+	-- Deactivation fallback just in case the user selects another plugin entirely
+	toolTrove:Connect(plugin.Deactivation, function()
+		toolTrove:Destroy()
+	end)
 end
 
 return ColorBehavior

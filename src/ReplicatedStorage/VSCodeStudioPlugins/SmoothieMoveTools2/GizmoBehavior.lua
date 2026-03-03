@@ -136,6 +136,13 @@ function GizmoBehavior.Init(plugin: Plugin, pluginTrove)
 			return
 		end
 
+		-- Check if the gizmo is explicitly requested to be hidden
+		local hideGizmos = Props.HideGizmos:Get()
+		if hideGizmos then
+			handles.Visible = false
+			return -- Exit early, no need to do expensive math if it's hidden!
+		end
+
 		local currentTool = Props.Tool:Get()
 		local selectedObjects = Props.SelectedObjects:Get()
 
@@ -161,6 +168,7 @@ function GizmoBehavior.Init(plugin: Plugin, pluginTrove)
 	pluginTrove:Add(Props.Tool:Observe(updateGizmo))
 	pluginTrove:Add(Props.SelectedObjects:Observe(updateGizmo))
 	pluginTrove:Add(Props.Axis:Observe(updateGizmo)) -- Re-orient when Axis changes
+	pluginTrove:Add(Props.HideGizmos:Observe(updateGizmo)) -- Added our new HideGizmos observer
 
 	pluginTrove:Add(Props.ActiveColor:Observe(function(color)
 		handles.Color3 = color

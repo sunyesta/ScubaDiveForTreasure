@@ -1,5 +1,6 @@
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+local ChangeHistoryService = game:GetService("ChangeHistoryService") -- Added ChangeHistoryService
 
 local Props = require(script.Parent.Props)
 local Enums = require(script.Parent.Enums)
@@ -8,6 +9,9 @@ local PluginGuiSlider = require(script.Parent.Modules.PluginGuiSlider)
 local ColorBehavior = require(script.Parent.ColorBehavior)
 
 local Widget = {}
+
+-- Track if the user is currently dragging a color slider
+local isColorDragging = false
 
 -- Theme Constants
 local THEME = {
@@ -328,6 +332,8 @@ local function createScrubInput(parent, property, min, max, step, trove, pluginG
 					if dragConn then
 						dragConn:Disconnect()
 						dragConn = nil
+						-- Create a waypoint when we finish dragging the scrubber!
+						ChangeHistoryService:SetWaypoint("Change Value")
 					end
 					return
 				end
@@ -389,6 +395,7 @@ local function createHexRow(parent, labelText, property, trove)
 
 		if success and newColor then
 			property:Set(newColor)
+			ChangeHistoryService:SetWaypoint("Change Hex Color") -- I also added it here for completeness!
 		else
 			-- Reset text to current color if input was invalid
 			local color = property:Get()
@@ -446,6 +453,28 @@ local function createColorSlider(parent, labelText, property, channel, trove, pl
 	knob.AutoButtonColor = false
 	knob.AnchorPoint = Vector2.new(0.5, 0.5)
 	knob.Parent = track
+
+	-- Connect dragging hooks for Undo functionality using Heartbeat polling
+	local function markDragging(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 and not isColorDragging then
+			isColorDragging = true
+
+			local dragConn
+			dragConn = RunService.Heartbeat:Connect(function()
+				if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+					isColorDragging = false
+					ChangeHistoryService:SetWaypoint("Change Tool Color")
+
+					if dragConn then
+						dragConn:Disconnect()
+						dragConn = nil
+					end
+				end
+			end)
+		end
+	end
+	track.InputBegan:Connect(markDragging)
+	knob.InputBegan:Connect(markDragging)
 
 	local slider = trove:Add(PluginGuiSlider.new(pluginGui, {
 		Bar = track,
@@ -543,6 +572,28 @@ local function createHSVSlider(parent, labelText, property, channel, trove, plug
 	knob.AnchorPoint = Vector2.new(0.5, 0.5)
 	knob.Parent = track
 
+	-- Connect dragging hooks for Undo functionality using Heartbeat polling
+	local function markDragging(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 and not isColorDragging then
+			isColorDragging = true
+
+			local dragConn
+			dragConn = RunService.Heartbeat:Connect(function()
+				if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+					isColorDragging = false
+					ChangeHistoryService:SetWaypoint("Change Tool Color")
+
+					if dragConn then
+						dragConn:Disconnect()
+						dragConn = nil
+					end
+				end
+			end)
+		end
+	end
+	track.InputBegan:Connect(markDragging)
+	knob.InputBegan:Connect(markDragging)
+
 	local slider = trove:Add(PluginGuiSlider.new(pluginGui, {
 		Bar = track,
 		Handle = knob,
@@ -590,6 +641,7 @@ local function createHSVSlider(parent, labelText, property, channel, trove, plug
 		end
 	end))
 end
+
 function Widget.Init(plugin, trove)
 	local pluginMouse = PluginMouse.new()
 	trove:Add(pluginMouse)
@@ -606,7 +658,7 @@ function Widget.Init(plugin, trove)
 	)
 
 	local pluginGui = plugin:CreateDockWidgetPluginGui("SmoothieMoveTools", widgetInfo)
-	pluginGui.Title = "Remote UI"
+	pluginGui.Title = "Smoothie Move Tools"
 	trove:Add(pluginGui)
 
 	-- 2. Main Container Setup
@@ -708,6 +760,12 @@ function Widget.Init(plugin, trove)
 	createQuickButton(rotRow, "10°", 10, Props.RotationDegIncrement)
 	createQuickButton(rotRow, "45°", 45, Props.RotationDegIncrement)
 
+	-- Margin between move/rotate rows and tools row
+	createFrame(transformSection, {
+		Size = UDim2.new(1, 0, 0, 8),
+		BackgroundTransparency = 1,
+	})
+
 	local toolsRow = createRow(transformSection, "Tools")
 	createSegmentedControl(toolsRow, {
 		{ Label = "Select", Value = Enums.Tools.Select },
@@ -715,6 +773,7 @@ function Widget.Init(plugin, trove)
 	}, Props.Tool, trove)
 
 	local axisRow = createRow(transformSection, "Axis")
+
 	createSegmentedControl(axisRow, {
 		{ Label = "Global", Value = Enums.Axis.Global },
 		{ Label = "Local", Value = Enums.Axis.Local },
@@ -793,6 +852,12 @@ function Widget.Init(plugin, trove)
 	cLayout.Padding = UDim.new(0, 12)
 	cLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	cLayout.Parent = colorSection
+
+	-- Margin
+	createFrame(colorSection, {
+		Size = UDim2.new(1, 0, 0, 8),
+		BackgroundTransparency = 1,
+	})
 
 	-- Coloring Header
 	local coloringHeader = createFrame(colorSection, {
@@ -1017,6 +1082,8 @@ function Widget.Init(plugin, trove)
 
 	local advancedRowContainer, advancedRow = createRow(advancedSection, "Keybinds")
 	createToggle(advancedRowContainer, "Swap Y and Z keybinds", Props.SwapYandZKeybinds, trove)
+	local advancedRowContainer2, advancedRow = createRow(advancedSection, "Keybinds")
+	createToggle(advancedRowContainer2, "Origins Only", Props.OriginsOnly, trove)
 end
 
 return Widget

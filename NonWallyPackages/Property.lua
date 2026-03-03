@@ -247,6 +247,10 @@ function NormalProp:Set(value)
 	self.Changed:Fire(value)
 end
 
+function NormalProp:Update(callback)
+	self:Set(callback(self:Get()))
+end
+
 function NormalProp:Observe(callback)
 	task.spawn(callback, self._value)
 	return self.Changed:Connect(callback)

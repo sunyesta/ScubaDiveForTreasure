@@ -7,10 +7,10 @@ local MoveAndRotateBehavior = require(script.MoveAndRotateBehavior)
 local ExtraBehavior = require(script.ExtraBehavior)
 
 -- Create the Toolbar and Button
-local toolbar = plugin:CreateToolbar("Smoothie Tools")
+local toolbar = plugin:CreateToolbar("Smoothie Move Tools")
 -- Arguments: ButtonId, Tooltip, Icon Asset ID
 local toggleButton = toolbar:CreateButton(
-	"ToggleUI",
+	"Toggle Smoothie Move Tolls",
 	"Toggle Smoothie Move Tools",
 	"rbxassetid://1507949215" -- Replace with your own icon asset ID
 )

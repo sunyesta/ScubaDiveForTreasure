@@ -1,3 +1,5 @@
+-- PlayerContext.lua
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ServerComm = require(ReplicatedStorage.Packages.Comm).ServerComm
@@ -16,5 +18,6 @@ return {
 		PlayerLoaded = Property.CreatePlayerCommProperty(PlayerComm, "PlayerLoaded", false),
 		Wins = Property.CreatePlayerCommProperty(PlayerComm, "Wins", 0),
 		MaxOxygen = Property.CreatePlayerCommProperty(PlayerComm, "MaxOxygen", 100),
+		Inventory = Property.CreatePlayerCommProperty(PlayerComm, "Inventory", {}),
 	},
 }

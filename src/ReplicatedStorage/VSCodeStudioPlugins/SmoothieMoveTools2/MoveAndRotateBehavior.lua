@@ -17,6 +17,8 @@ local TRACKBALL_SENSITIVITY = 5
 
 local MoveAndRotateBehavior = {}
 
+type SaveStateFunc = (ray: Ray?, pos: Vector2?) -> ()
+
 --------------------------------------------------------------------------------
 -- UTILITY FUNCTIONS
 --------------------------------------------------------------------------------
@@ -78,7 +80,6 @@ local function LookAtWithoutUp(currentCFrame: CFrame, targetPoint: Vector3): CFr
 	local directionToTarget = (targetPoint - currentPosition)
 	local directionOnPlane = directionToTarget - (directionToTarget:Dot(upVector) * upVector)
 
-	-- Added a small magnitude check to prevent NaN errors if looking straight up/down
 	if directionOnPlane.Magnitude < 1e-5 then
 		return currentCFrame
 	end
@@ -106,8 +107,13 @@ end
 -- DRAG STYLES
 --------------------------------------------------------------------------------
 
-local function TranslateDragStyle(initialOrigin: CFrame, dragAxis1: Vector3, dragAxis2: Vector3?)
-	local initialMouseRay = PluginMouse:GetRay()
+local function TranslateDragStyle(
+	initialOrigin: CFrame,
+	dragAxis1: Vector3,
+	dragAxis2: Vector3?,
+	initialMouseRay: Ray?,
+	saveState: SaveStateFunc?
+)
 	local selectedParts = Props.SelectedParts:Get()
 
 	local snapRaycastParams = RaycastParams.new()
@@ -134,7 +140,10 @@ local function TranslateDragStyle(initialOrigin: CFrame, dragAxis1: Vector3, dra
 		return hitPos
 	end
 
-	local initialHit = calculateHit(initialMouseRay)
+	local initialHit: Vector3? = nil
+	if initialMouseRay then
+		initialHit = calculateHit(initialMouseRay)
+	end
 
 	return function(_adjustedMousePos: Vector2)
 		local useSnapping = Props.UseSnapping:Get()
@@ -153,6 +162,14 @@ local function TranslateDragStyle(initialOrigin: CFrame, dragAxis1: Vector3, dra
 			end
 
 			return nil
+		end
+
+		-- Capture state dynamically on the first frame if it wasn't passed via a hot-swap
+		if not initialHit then
+			initialHit = calculateHit(currentRay)
+			if saveState then
+				saveState(currentRay, nil)
+			end
 		end
 
 		local currentHit = calculateHit(currentRay)
@@ -183,7 +200,13 @@ local function TranslateDragStyle(initialOrigin: CFrame, dragAxis1: Vector3, dra
 	end
 end
 
-local function RotateDragStyle(initialOrigin: CFrame, dragAxis1: Vector3, dragAxis2: Vector3?)
+local function RotateDragStyle(
+	initialOrigin: CFrame,
+	dragAxis1: Vector3,
+	dragAxis2: Vector3?,
+	initialMouseRay: Ray?,
+	saveState: SaveStateFunc?
+)
 	local function getRotatePlaneNormal()
 		if dragAxis1 and dragAxis2 then
 			return dragAxis1:Cross(dragAxis2).Unit
@@ -193,16 +216,27 @@ local function RotateDragStyle(initialOrigin: CFrame, dragAxis1: Vector3, dragAx
 	end
 
 	local rotatePlaneNormal = getRotatePlaneNormal()
-	local initialMouseRay = PluginMouse:GetRay()
 
 	local function getPlaneHit(mouseRay: Ray)
 		return LineToPlaneIntersection(mouseRay.Origin, mouseRay.Direction, initialOrigin.Position, rotatePlaneNormal)
 	end
 
-	local initialPlaneHit = getPlaneHit(initialMouseRay)
+	local initialPlaneHit: Vector3? = nil
+	if initialMouseRay then
+		initialPlaneHit = getPlaneHit(initialMouseRay)
+	end
 
 	return function(_adjustedMousePos: Vector2)
 		local currentRay = PluginMouse:GetRay()
+
+		-- Capture state dynamically on the first frame if it wasn't passed via a hot-swap
+		if not initialPlaneHit then
+			initialPlaneHit = getPlaneHit(currentRay)
+			if saveState then
+				saveState(currentRay, nil)
+			end
+		end
+
 		local currentPlaneHit = getPlaneHit(currentRay)
 
 		if not currentPlaneHit or not initialPlaneHit then
@@ -229,13 +263,12 @@ local function RotateDragStyle(initialOrigin: CFrame, dragAxis1: Vector3, dragAx
 	end
 end
 
-local function TrackballDragStyle(initialOrigin: CFrame)
+local function TrackballDragStyle(initialOrigin: CFrame, initialMousePos: Vector2?, saveState: SaveStateFunc?)
 	local cam = Workspace.CurrentCamera
 	local centerPos, onScreen = cam:WorldToViewportPoint(initialOrigin.Position)
 	local center2D = Vector2.new(centerPos.X, centerPos.Y)
 
 	local viewportSize = cam.ViewportSize
-	-- Added math.max(1, ...) to guarantee we never hit a Divide By Zero error if viewport shrinks
 	local trackballRadius = math.max(1, math.min(viewportSize.X, viewportSize.Y) / 2)
 
 	if not onScreen then
@@ -255,17 +288,19 @@ local function TrackballDragStyle(initialOrigin: CFrame)
 		end
 	end
 
-	-- We intentionally delay vStart creation until the very first update frame
-	-- to prevent PluginMouse:(0,0) startup desync bugs.
 	local vStart: Vector3? = nil
+	if initialMousePos then
+		vStart = projectToSphere(initialMousePos)
+	end
 
 	return function(_adjustedMousePos: Vector2)
-		-- Ignore the wrapper's _adjustedMousePos just like Translate and Rotate do
-		-- to prevent coordinate system mismatches with GeometricDrag internals.
 		local currentMousePos = PluginMouse:GetPosition()
 
 		if not vStart then
 			vStart = projectToSphere(currentMousePos)
+			if saveState then
+				saveState(nil, currentMousePos)
+			end
 		end
 
 		local startVec = vStart :: Vector3
@@ -303,7 +338,15 @@ function MoveAndRotateBehavior.Init(plugin: Plugin, pluginTrove: any)
 		Type: string,
 		InitialOrigin: CFrame,
 		OriginalCFrames: { [BasePart]: CFrame },
+		OriginalPivotOffsets: { [BasePart]: CFrame },
+		PartOffsets: { [BasePart]: CFrame },
 		PreviousRibbonTool: Enum.RibbonTool?,
+		InitialSelection: { Instance },
+		InitialMouseRay: Ray?,
+		InitialMousePos: Vector2?,
+		Drag: any, -- Represents the GeometricDrag object
+		DragStyleFunc: (Vector2) -> CFrame?,
+		UpdateConnection: RBXScriptConnection?,
 		Cleanup: () -> (),
 	}
 
@@ -312,12 +355,18 @@ function MoveAndRotateBehavior.Init(plugin: Plugin, pluginTrove: any)
 	local function StopSession(commit: boolean)
 		if currentSession then
 			SelectionBehavior.IsTransforming = false
+			Props.HideGizmos:Set(false)
 
 			local previousTool = currentSession.PreviousRibbonTool
+			local initialSelection = currentSession.InitialSelection
 			currentSession.Cleanup()
 
 			if not commit then
 				for part, cframe in pairs(currentSession.OriginalCFrames) do
+					-- Safely restore the original pivot offset and part CFrame
+					if currentSession.OriginalPivotOffsets[part] then
+						part.PivotOffset = currentSession.OriginalPivotOffsets[part]
+					end
 					part:PivotTo(cframe)
 				end
 			else
@@ -346,27 +395,86 @@ function MoveAndRotateBehavior.Init(plugin: Plugin, pluginTrove: any)
 						plugin:SelectRibbonTool(previousTool)
 					end)
 				end
+
+				task.defer(function()
+					Selection:Set(initialSelection)
+				end)
 			end)
 		end
 	end
 
 	local function StartSession(transformType: string, dragAxis1: Vector3, dragAxis2: Vector3?)
-		local previousTool = plugin:GetSelectedRibbonTool()
-
+		-- HOT-SWAP LOGIC: If a session exists, safely change the transform constraints mid-drag
 		if currentSession then
-			previousTool = currentSession.PreviousRibbonTool
+			currentSession.Type = transformType
 
-			for part, cframe in pairs(currentSession.OriginalCFrames) do
-				part:PivotTo(cframe)
+			local dragStyleFunc
+			if transformType == Enums.TransformType.Move then
+				dragStyleFunc = TranslateDragStyle(
+					currentSession.InitialOrigin,
+					dragAxis1,
+					dragAxis2,
+					currentSession.InitialMouseRay,
+					nil
+				)
+			elseif transformType == Enums.TransformType.Rotate then
+				dragStyleFunc = RotateDragStyle(
+					currentSession.InitialOrigin,
+					dragAxis1,
+					dragAxis2,
+					currentSession.InitialMouseRay,
+					nil
+				)
+			elseif transformType == Enums.TransformType.RotateTrackball then
+				dragStyleFunc = TrackballDragStyle(currentSession.InitialOrigin, currentSession.InitialMousePos, nil)
+			elseif transformType == Enums.TransformType.Twist then
+				dragStyleFunc = RotateDragStyle(
+					currentSession.InitialOrigin,
+					currentSession.InitialOrigin.UpVector,
+					nil,
+					currentSession.InitialMouseRay,
+					nil
+				)
 			end
 
-			currentSession.Cleanup()
-		else
-			plugin:Activate(true)
+			if dragStyleFunc then
+				currentSession.DragStyleFunc = dragStyleFunc
+				currentSession.Drag:SetDragStyle(function(adjustedMousePos)
+					return currentSession.DragStyleFunc(adjustedMousePos)
+				end)
+
+				-- Step the drag forcefully so the part visualizes on the new axis immediately
+				local mousePos = PluginMouse:GetPosition()
+				local newTransformOrigin = currentSession.Drag:Step(mousePos)
+				if newTransformOrigin then
+					local originsOnly = Props.OriginsOnly:Get()
+
+					for part, offset in pairs(currentSession.PartOffsets) do
+						local targetPivot = newTransformOrigin:ToWorldSpace(offset)
+
+						if originsOnly then
+							-- Only modify PivotOffset, leave geometry unchanged
+							part.PivotOffset = part.CFrame:ToObjectSpace(targetPivot)
+						else
+							-- Move whole part (restore original PivotOffset to avoid mid-toggle jumps)
+							part.PivotOffset = currentSession.OriginalPivotOffsets[part]
+							part:PivotTo(targetPivot)
+						end
+					end
+					Props.TransformOrigin:Set(newTransformOrigin)
+				end
+			end
+
+			return -- Exit function so we don't start a new session!
 		end
 
-		local selectedParts = Props.SelectedParts:Get()
+		-- NEW SESSION LOGIC: Setup the initial states
+		local previousTool = plugin:GetSelectedRibbonTool()
+		local currentSelection = Selection:Get()
 
+		plugin:Activate(true)
+
+		local selectedParts = Props.SelectedParts:Get()
 		if #selectedParts == 0 then
 			return
 		end
@@ -375,28 +483,43 @@ function MoveAndRotateBehavior.Init(plugin: Plugin, pluginTrove: any)
 		local initialOrigin = SelectionBehavior.CalculateTransformOrigin()
 
 		Props.TransformOrigin:Set(initialOrigin)
+		Props.HideGizmos:Set(true)
 
 		SelectionBehavior.IsTransforming = true
 
 		local originalCFrames = {}
+		local originalPivotOffsets = {}
 		local partOffsets = {}
 
 		for _, part in ipairs(selectedParts) do
 			if part:IsA("BasePart") then
-				local pivot = currentSession and currentSession.OriginalCFrames[part] or part:GetPivot()
+				local pivot = part:GetPivot()
 				originalCFrames[part] = pivot
+				originalPivotOffsets[part] = part.PivotOffset
 				partOffsets[part] = initialOrigin:ToObjectSpace(pivot)
 			end
 		end
 
-		local dragStyleFunc
+		local function saveInitialState(ray: Ray?, pos: Vector2?)
+			if currentSession then
+				if ray then
+					currentSession.InitialMouseRay = ray
+				end
+				if pos then
+					currentSession.InitialMousePos = pos
+				end
+			end
+		end
 
+		local dragStyleFunc
 		if transformType == Enums.TransformType.Move then
-			dragStyleFunc = TranslateDragStyle(initialOrigin, dragAxis1, dragAxis2)
+			dragStyleFunc = TranslateDragStyle(initialOrigin, dragAxis1, dragAxis2, nil, saveInitialState)
 		elseif transformType == Enums.TransformType.Rotate then
-			dragStyleFunc = RotateDragStyle(initialOrigin, dragAxis1, dragAxis2)
+			dragStyleFunc = RotateDragStyle(initialOrigin, dragAxis1, dragAxis2, nil, saveInitialState)
 		elseif transformType == Enums.TransformType.RotateTrackball then
-			dragStyleFunc = TrackballDragStyle(initialOrigin)
+			dragStyleFunc = TrackballDragStyle(initialOrigin, nil, saveInitialState)
+		elseif transformType == Enums.TransformType.Twist then
+			dragStyleFunc = RotateDragStyle(initialOrigin, initialOrigin.UpVector, nil, nil, saveInitialState)
 		end
 
 		if not dragStyleFunc then
@@ -409,40 +532,59 @@ function MoveAndRotateBehavior.Init(plugin: Plugin, pluginTrove: any)
 			PluginMouse:Enable()
 		end
 
+		-- Prepare currentSession before assigning SetDragStyle, ensuring our save callback functions seamlessly
+		currentSession = {
+			Type = transformType,
+			InitialOrigin = initialOrigin,
+			OriginalCFrames = originalCFrames,
+			OriginalPivotOffsets = originalPivotOffsets,
+			PartOffsets = partOffsets,
+			PreviousRibbonTool = previousTool,
+			InitialSelection = currentSelection,
+			InitialMouseRay = nil,
+			InitialMousePos = nil,
+			Drag = drag,
+			DragStyleFunc = dragStyleFunc,
+			UpdateConnection = nil,
+			Cleanup = function()
+				if currentSession and currentSession.UpdateConnection then
+					currentSession.UpdateConnection:Disconnect()
+				end
+				drag:StopDrag()
+				drag:Destroy()
+			end,
+		}
+
 		drag:SetDragStyle(function(adjustedMousePos)
-			return dragStyleFunc(adjustedMousePos)
+			return currentSession.DragStyleFunc(adjustedMousePos)
 		end)
 
 		drag:StartDrag()
 
-		------------------------------------------------------------------
-		-- CONSOLIDATED LOOP
-		------------------------------------------------------------------
-
-		local updateConnection = RunService.Heartbeat:Connect(function()
+		currentSession.UpdateConnection = RunService.Heartbeat:Connect(function()
 			local mousePos = PluginMouse:GetPosition()
 			local newTransformOrigin = drag:Step(mousePos)
 
 			if newTransformOrigin then
+				local originsOnly = Props.OriginsOnly:Get()
+
 				for part, offset in pairs(partOffsets) do
-					part:PivotTo(newTransformOrigin:ToWorldSpace(offset))
+					local targetPivot = newTransformOrigin:ToWorldSpace(offset)
+
+					if originsOnly then
+						-- Math explanation: part.CFrame * part.PivotOffset = targetPivot
+						-- Therefore: part.PivotOffset = part.CFrame:Inverse() * targetPivot
+						part.PivotOffset = part.CFrame:ToObjectSpace(targetPivot)
+					else
+						-- Reset pivot to original just in case they toggled OriginsOnly mid-drag
+						part.PivotOffset = originalPivotOffsets[part]
+						part:PivotTo(targetPivot)
+					end
 				end
 
 				Props.TransformOrigin:Set(newTransformOrigin)
 			end
 		end)
-
-		currentSession = {
-			Type = transformType,
-			InitialOrigin = initialOrigin,
-			OriginalCFrames = originalCFrames,
-			PreviousRibbonTool = previousTool,
-			Cleanup = function()
-				updateConnection:Disconnect()
-				drag:StopDrag()
-				drag:Destroy()
-			end,
-		}
 	end
 
 	MoveAndRotateBehavior.StartTransformation = StartSession
@@ -468,6 +610,8 @@ function MoveAndRotateBehavior.Init(plugin: Plugin, pluginTrove: any)
 			elseif key == Enum.KeyCode.R then
 				local camLookVector = Workspace.CurrentCamera.CFrame.LookVector
 				StartSession(Enums.TransformType.Rotate, camLookVector)
+			elseif key == Enum.KeyCode.T then
+				StartSession(Enums.TransformType.Twist, Vector3.yAxis)
 			end
 		elseif currentSession then
 			local xAxis, yAxis, zAxis = GetWorkingAxes(currentSession.InitialOrigin)
@@ -486,6 +630,8 @@ function MoveAndRotateBehavior.Init(plugin: Plugin, pluginTrove: any)
 					local camLookVector = Workspace.CurrentCamera.CFrame.LookVector
 					StartSession(Enums.TransformType.Rotate, camLookVector)
 				end
+			elseif key == Enum.KeyCode.T then
+				StartSession(Enums.TransformType.Twist, Vector3.yAxis)
 			elseif key == Enum.KeyCode.X then
 				if shiftDown then
 					StartSession(currentSession.Type, yAxis, zAxis)

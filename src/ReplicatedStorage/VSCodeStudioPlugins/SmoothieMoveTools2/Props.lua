@@ -20,4 +20,6 @@ return {
 	SwapYandZKeybinds = Property.new(true),
 	MoveStudsIncrement = Property.new(0),
 	RotationDegIncrement = Property.new(0),
+	HideGizmos = Property.new(false),
+	OriginsOnly = Property.new(false),
 }
