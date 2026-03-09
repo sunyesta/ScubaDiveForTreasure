@@ -9,7 +9,8 @@ local Trove = require(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("T
 local World2DUtils = {}
 
 World2DUtils.DefaultPlaneNormal = Vector3.new(0, 0, -1)
-World2DUtils.DefaultPlaneOrigin = workspace:WaitForChild("MAP"):WaitForChild("WaterPlane").Position
+World2DUtils.DefaultPlaneOrigin =
+	workspace:WaitForChild("OceanMap"):WaitForChild("WaterPlane"):WaitForChild("WaterPlane").Position
 
 --[[
     Creates a constraint that locks the character's movement to a 2D plane defined by the normal.

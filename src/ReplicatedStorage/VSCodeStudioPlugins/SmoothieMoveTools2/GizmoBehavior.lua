@@ -7,7 +7,17 @@ local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local Props = require(script.Parent.Props)
 local Enums = require(script.Parent.Enums)
 
+local PRECISION_MULTIPLIER = 0.1
+
 local GizmoBehavior = {}
+
+-- Utility function to snap values strictly to the grid interval
+local function SnapToGrid(value: number, step: number): number
+	if step <= 0 then
+		return value
+	end
+	return math.round(value / step) * step
+end
 
 -- Helper function to recursively get all BaseParts from the current selection
 local function getActiveParts(objects: { Instance }): { BasePart }
@@ -79,7 +89,6 @@ local function getAxisRotation(selectedObjects: { Instance }): CFrame
 		if activePart and activePart:IsA("BasePart") then
 			return activePart.CFrame.Rotation
 		else
-			-- Fallback: Use the transform origin or the first selected part
 			local transformOrigin = Props.TransformOrigin:Get()
 			if transformOrigin and transformOrigin ~= CFrame.new() then
 				return transformOrigin.Rotation
@@ -117,7 +126,7 @@ function GizmoBehavior.Init(plugin: Plugin, pluginTrove)
 
 	local handles = Instance.new("Handles")
 	handles.Style = Enum.HandlesStyle.Resize
-	handles.Color3 = Props.ActiveColor:Get() or Color3.fromRGB(13, 105, 172)
+	handles.Color3 = Color3.fromRGB(0, 255, 34)
 	handles.Adornee = proxyPart
 	handles.Parent = gizmoFolder
 	pluginTrove:Add(handles)
@@ -136,20 +145,17 @@ function GizmoBehavior.Init(plugin: Plugin, pluginTrove)
 			return
 		end
 
-		-- Check if the gizmo is explicitly requested to be hidden
 		local hideGizmos = Props.HideGizmos:Get()
 		if hideGizmos then
 			handles.Visible = false
-			return -- Exit early, no need to do expensive math if it's hidden!
+			return
 		end
 
 		local currentTool = Props.Tool:Get()
 		local selectedObjects = Props.SelectedObjects:Get()
 
 		if currentTool == Enums.Tools.Scale and #selectedObjects > 0 then
-			-- Calculate rotation constraint based on Local/Global/View
 			local baseRotation = getAxisRotation(selectedObjects)
-
 			local boxCFrame, boxSize = getOrientedBoundingBox(selectedObjects, baseRotation)
 
 			if boxSize.Magnitude > 0 then
@@ -167,12 +173,8 @@ function GizmoBehavior.Init(plugin: Plugin, pluginTrove)
 	pluginTrove:Add(RunService.RenderStepped:Connect(updateGizmo))
 	pluginTrove:Add(Props.Tool:Observe(updateGizmo))
 	pluginTrove:Add(Props.SelectedObjects:Observe(updateGizmo))
-	pluginTrove:Add(Props.Axis:Observe(updateGizmo)) -- Re-orient when Axis changes
-	pluginTrove:Add(Props.HideGizmos:Observe(updateGizmo)) -- Added our new HideGizmos observer
-
-	pluginTrove:Add(Props.ActiveColor:Observe(function(color)
-		handles.Color3 = color
-	end))
+	pluginTrove:Add(Props.Axis:Observe(updateGizmo))
+	pluginTrove:Add(Props.HideGizmos:Observe(updateGizmo))
 
 	pluginTrove:Add(handles.MouseButton1Down:Connect(function()
 		isDragging = true
@@ -203,12 +205,68 @@ function GizmoBehavior.Init(plugin: Plugin, pluginTrove)
 			or UserInputService:IsKeyDown(Enum.KeyCode.RightAlt)
 		local isCtrlDown = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
 			or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
+		local isPrecision = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+			or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
 
+		local useSnapping = Props.UseSnapping:Get()
+		local snappingMode = Props.SnappingMode:Get()
+		local moveStep = Props.MoveStudsIncrement:Get()
+		local isGridSnap = false
+
+		if useSnapping and snappingMode == Enums.SnappingMode.Grid then
+			moveStep = Props.GridSize:Get()
+			isGridSnap = true
+		end
+
+		if isPrecision then
+			distance *= PRECISION_MULTIPLIER
+			if moveStep > 0 then
+				moveStep *= PRECISION_MULTIPLIER
+			end
+		end
+
+		-- Calculate Normal directions
 		local faceNormal = Vector3.FromNormalId(face)
-		local deltaVector = faceNormal * distance
+		local worldNormal = initialBoxCFrame:VectorToWorldSpace(faceNormal)
+
+		local targetDistance = distance
+
+		if moveStep > 0 then
+			if isGridSnap then
+				-- ABSOLUTE GRID SNAPPING: Force endpoints to sit perfectly on grid intersections
+
+				-- 1. Find where the moving face currently is in World Space
+				local localFaceOffset = faceNormal * (initialBoxSize / 2)
+				local initialWorldFaceCenter = initialBoxCFrame:PointToWorldSpace(localFaceOffset)
+
+				-- 2. Find where the mouse is attempting to pull the face to in World Space
+				local draggedWorldFaceCenter = initialWorldFaceCenter + (worldNormal * distance)
+
+				-- 3. Snap the target World Space position to our grid, but only apply it
+				-- to the axes that correspond to the normal direction we are pulling.
+				local snappedWorldX = math.abs(worldNormal.X) > 0.001 and SnapToGrid(draggedWorldFaceCenter.X, moveStep)
+					or draggedWorldFaceCenter.X
+				local snappedWorldY = math.abs(worldNormal.Y) > 0.001 and SnapToGrid(draggedWorldFaceCenter.Y, moveStep)
+					or draggedWorldFaceCenter.Y
+				local snappedWorldZ = math.abs(worldNormal.Z) > 0.001 and SnapToGrid(draggedWorldFaceCenter.Z, moveStep)
+					or draggedWorldFaceCenter.Z
+
+				local snappedWorldFaceCenter = Vector3.new(snappedWorldX, snappedWorldY, snappedWorldZ)
+
+				-- 4. Convert the snapped position back into the bounding box's Local Space.
+				-- This allows us to figure out the final absolute distance the face moved.
+				local snappedLocalFaceCenter = initialBoxCFrame:PointToObjectSpace(snappedWorldFaceCenter)
+				targetDistance = (snappedLocalFaceCenter - localFaceOffset):Dot(faceNormal)
+			else
+				-- RELATIVE SNAPPING: Simply snap the raw mouse distance dragged
+				targetDistance = SnapToGrid(distance, moveStep)
+			end
+		end
+
+		local deltaVector = faceNormal * targetDistance
 		local sizeChange = Vector3.new(math.abs(deltaVector.X), math.abs(deltaVector.Y), math.abs(deltaVector.Z))
 
-		if distance < 0 then
+		if targetDistance < 0 then
 			sizeChange = -sizeChange
 		end
 
@@ -242,10 +300,7 @@ function GizmoBehavior.Init(plugin: Plugin, pluginTrove)
 
 		local actualDeltaSize = newBoxSize - initialBoxSize
 
-		-- Center shift calculation (relative to the bounding box's local space)
 		local localCenterShift = (actualDeltaSize * faceNormal) / 2
-
-		-- Convert local center shift to world space using the bounding box's rotation
 		local worldCenterShift = initialBoxCFrame:VectorToWorldSpace(localCenterShift)
 
 		local newBoxCenter = initialBoxCFrame.Position
@@ -258,7 +313,6 @@ function GizmoBehavior.Init(plugin: Plugin, pluginTrove)
 		proxyPart.Size = newBoxSize
 		proxyPart.CFrame = newBoxCFrame
 
-		-- Scale multiplier representing scale factor along the Bounding Box's local axes
 		local boxScaleMultiplier = Vector3.new(
 			initialBoxSize.X > minSize and (newBoxSize.X / initialBoxSize.X) or 1,
 			initialBoxSize.Y > minSize and (newBoxSize.Y / initialBoxSize.Y) or 1,
@@ -269,15 +323,11 @@ function GizmoBehavior.Init(plugin: Plugin, pluginTrove)
 		table.clear(cframesBatch)
 
 		for part, state in pairs(initialStates) do
-			-- 1. Position Calculation:
-			-- Convert part pos to box's local space, scale it, return to world space
 			local localRelativePos = initialBoxCFrame:PointToObjectSpace(state.CFrame.Position)
 			local scaledRelativePos = localRelativePos * boxScaleMultiplier
 			local newWorldPos = newBoxCFrame:PointToWorldSpace(scaledRelativePos)
 			local targetCFrame = CFrame.new(newWorldPos) * state.CFrame.Rotation
 
-			-- 2. Size Calculation:
-			-- To avoid shearing, project the part's axes into the bounding box's local space
 			local localRight = initialBoxCFrame:VectorToObjectSpace(state.CFrame.RightVector)
 			local localUp = initialBoxCFrame:VectorToObjectSpace(state.CFrame.UpVector)
 			local localLook = initialBoxCFrame:VectorToObjectSpace(state.CFrame.LookVector)
@@ -289,7 +339,6 @@ function GizmoBehavior.Init(plugin: Plugin, pluginTrove)
 
 			part.Size = state.Size * partScaleMultiplier
 
-			-- 3. PivotOffset Calculation
 			local newPivotOffset = CFrame.new(state.PivotOffset.Position * partScaleMultiplier)
 				* state.PivotOffset.Rotation
 			part.PivotOffset = newPivotOffset

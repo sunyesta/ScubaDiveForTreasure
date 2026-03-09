@@ -1,6 +1,6 @@
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
-local ChangeHistoryService = game:GetService("ChangeHistoryService") -- Added ChangeHistoryService
+local ChangeHistoryService = game:GetService("ChangeHistoryService")
 
 local Props = require(script.Parent.Props)
 local Enums = require(script.Parent.Enums)
@@ -73,75 +73,105 @@ local function createRow(parent, labelText)
 	return container, row
 end
 
--- Updated UI Builder for Icon-based Inputs with Custom Size parameter
-local function createIconInputBox(parent, iconId, property, trove, customSize)
+-- New UI Builder: Editable Segmented Control for Move and Rotate Chips
+local function createEditableSegmentedControl(parent, options, formatStr, property, trove, customSize)
 	local container = createFrame(parent, {
 		Size = customSize or UDim2.new(1, 0, 1, 0),
-		BackgroundColor3 = THEME.SectionBg,
+		BackgroundTransparency = 1,
 	})
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 6)
-	corner.Parent = container
 
-	local icon = Instance.new("ImageLabel")
-	icon.Size = UDim2.new(0, 16, 0, 16)
-	icon.Position = UDim2.new(0, 8, 0.5, -8)
-	icon.BackgroundTransparency = 1
-	icon.Image = iconId
-	icon.ImageColor3 = THEME.TextMuted
-	icon.Parent = container
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 4) -- Space between chips
+	layout.Parent = container
 
-	local textBox = Instance.new("TextBox")
-	textBox.Size = UDim2.new(1, -32, 1, 0)
-	textBox.Position = UDim2.new(0, 32, 0, 0)
-	textBox.BackgroundTransparency = 1
-	textBox.TextColor3 = THEME.Text
-	textBox.Font = Enum.Font.Code
-	textBox.TextSize = 14
-	textBox.TextXAlignment = Enum.TextXAlignment.Left
-	textBox.Parent = container
+	local chips = {}
+	-- Calculate exact percentage width for each chip based on how many options we have
+	local totalPadding = 4 * (#options - 1)
+	local chipWidth = UDim2.new(1 / #options, -math.floor(totalPadding / #options), 1, 0)
 
-	textBox.FocusLost:Connect(function()
-		local num = tonumber(textBox.Text)
-		if num then
-			property:Set(num)
-		else
-			textBox.Text = tostring(property:Get())
-		end
-	end)
+	for i, optValue in ipairs(options) do
+		local chipVal = optValue -- Internal state tracking for this specific chip
 
-	-- Sync text back when property updates externally
-	trove:Add(property:Observe(function(val)
-		if val ~= nil and not textBox:IsFocused() then
-			textBox.Text = tostring(val)
+		local chipFrame = createFrame(container, {
+			Size = chipWidth,
+			BackgroundColor3 = THEME.SectionBg,
+		})
+
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 6)
+		corner.Parent = chipFrame
+
+		-- The editable textbox inside the chip
+		local textBox = Instance.new("TextBox")
+		textBox.Size = UDim2.new(1, 0, 1, 0)
+		textBox.BackgroundTransparency = 1
+		textBox.Font = Enum.Font.GothamMedium
+		textBox.TextSize = 12
+		textBox.TextColor3 = THEME.TextMuted
+		textBox.TextXAlignment = Enum.TextXAlignment.Center
+		textBox.ClearTextOnFocus = false -- Prevents erasing when clicked!
+		textBox.Text = string.format(formatStr, tostring(chipVal))
+		textBox.Parent = chipFrame
+
+		-- Invisible button layered over the textbox to intercept selections
+		local overlayBtn = Instance.new("TextButton")
+		overlayBtn.Size = UDim2.new(1, 0, 1, 0)
+		overlayBtn.BackgroundTransparency = 1
+		overlayBtn.Text = ""
+		overlayBtn.ZIndex = 2
+		overlayBtn.Parent = chipFrame
+
+		-- If the chip isn't selected, the button catches the click and selects it
+		overlayBtn.MouseButton1Click:Connect(function()
+			property:Set(chipVal)
+		end)
+
+		-- When the TextBox finally gets focused (only possible when overlay is hidden)
+		textBox.Focused:Connect(function()
+			-- Strip out format symbols (like "°") so editing is pure numbers
+			textBox.Text = tostring(chipVal)
+		end)
+
+		textBox.FocusLost:Connect(function()
+			local num = tonumber(textBox.Text)
+			if num then
+				chipVal = num
+				property:Set(chipVal)
+			end
+			-- Reapply the formatting
+			textBox.Text = string.format(formatStr, tostring(chipVal))
+		end)
+
+		chips[i] = {
+			Frame = chipFrame,
+			TextBox = textBox,
+			OverlayBtn = overlayBtn,
+			GetValue = function()
+				return chipVal
+			end,
+		}
+	end
+
+	-- Observe property changes to highlight the correct chip visually
+	trove:Add(property:Observe(function(newValue)
+		for _, chip in ipairs(chips) do
+			if chip.GetValue() == newValue then
+				-- Active State
+				chip.Frame.BackgroundColor3 = THEME.Primary
+				chip.TextBox.TextColor3 = Color3.new(1, 1, 1)
+				chip.OverlayBtn.Visible = false -- Hide the button so the TextBox can be clicked directly
+			else
+				-- Inactive State
+				chip.Frame.BackgroundColor3 = THEME.SectionBg
+				chip.TextBox.TextColor3 = THEME.TextMuted
+				chip.OverlayBtn.Visible = true -- Block the TextBox and act as a selector button
+			end
 		end
 	end))
 
 	return container
-end
-
--- New UI Builder for Quick Preset Buttons
-local function createQuickButton(parent, labelText, value, property)
-	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(0, 36, 1, 0)
-	btn.BackgroundColor3 = THEME.SectionBg
-	btn.Text = labelText
-	btn.TextColor3 = THEME.TextMuted
-	btn.Font = Enum.Font.GothamMedium
-	btn.TextSize = 12
-	btn.AutoButtonColor = true
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 6)
-	corner.Parent = btn
-
-	btn.Parent = parent
-
-	btn.MouseButton1Click:Connect(function()
-		property:Set(value)
-	end)
-
-	return btn
 end
 
 local function createSegmentedControl(parent, options, property, trove)
@@ -234,18 +264,23 @@ local function createToggle(parent, labelText, property, trove)
 	btn.Parent = container
 
 	btn.MouseButton1Click:Connect(function()
-		property:Set(not property:Get())
+		-- Safeguard incase the property wasn't defined yet
+		if property then
+			property:Set(not property:Get())
+		end
 	end)
 
 	-- Sync
-	trove:Add(property:Observe(function(isToggled)
-		toggleBg.BackgroundColor3 = isToggled and THEME.Primary or THEME.SectionBg
-		-- Animate knob position
-		knob.Position = isToggled and UDim2.new(1, -20, 0.5, -8) or UDim2.new(0, 4, 0.5, -8)
-	end))
+	if property then
+		trove:Add(property:Observe(function(isToggled)
+			toggleBg.BackgroundColor3 = isToggled and THEME.Primary or THEME.SectionBg
+			-- Animate knob position
+			knob.Position = isToggled and UDim2.new(1, -20, 0.5, -8) or UDim2.new(0, 4, 0.5, -8)
+		end))
+	end
 end
 
-local function createScrubInput(parent, property, min, max, step, trove, pluginGui)
+local function createScrubInput(parent, property, min, max, step, formatStr, trove, pluginGui)
 	local container = createFrame(parent, { Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = THEME.SectionBg })
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0, 6)
@@ -275,7 +310,12 @@ local function createScrubInput(parent, property, min, max, step, trove, pluginG
 	textBox.TextColor3 = THEME.Text
 	textBox.Font = Enum.Font.Code
 	textBox.TextSize = 14
+	textBox.ClearTextOnFocus = false
 	textBox.Parent = container
+
+	local function formatValue(val)
+		return formatStr and string.format(formatStr, tostring(val)) or tostring(val)
+	end
 
 	local function updateValue(delta)
 		local current = property:Get() or 0
@@ -292,6 +332,10 @@ local function createScrubInput(parent, property, min, max, step, trove, pluginG
 		updateValue(step)
 	end)
 
+	textBox.Focused:Connect(function()
+		textBox.Text = tostring(property:Get() or 0)
+	end)
+
 	textBox.FocusLost:Connect(function()
 		local num = tonumber(textBox.Text)
 		if num then
@@ -300,7 +344,7 @@ local function createScrubInput(parent, property, min, max, step, trove, pluginG
 			newVal = math.round(newVal * inv) / inv
 			property:Set(newVal)
 		else
-			textBox.Text = tostring(property:Get())
+			textBox.Text = formatValue(property:Get())
 		end
 	end)
 
@@ -350,8 +394,8 @@ local function createScrubInput(parent, property, min, max, step, trove, pluginG
 	end)
 
 	trove:Add(property:Observe(function(val)
-		if val then
-			textBox.Text = tostring(val)
+		if val and not textBox:IsFocused() then
+			textBox.Text = formatValue(val)
 		end
 	end))
 end
@@ -395,7 +439,7 @@ local function createHexRow(parent, labelText, property, trove)
 
 		if success and newColor then
 			property:Set(newColor)
-			ChangeHistoryService:SetWaypoint("Change Hex Color") -- I also added it here for completeness!
+			ChangeHistoryService:SetWaypoint("Change Hex Color")
 		else
 			-- Reset text to current color if input was invalid
 			local color = property:Get()
@@ -712,7 +756,7 @@ function Widget.Init(plugin, trove)
 		Font = Enum.Font.Gotham,
 	})
 
-	-- Stacked Movement Settings Section with Quick Presets
+	-- Stacked Movement Settings Section with Editable Chips
 	local movementSettingsContainer = createFrame(transformSection, {
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
@@ -731,13 +775,24 @@ function Widget.Init(plugin, trove)
 	local moveRowLayout = Instance.new("UIListLayout")
 	moveRowLayout.FillDirection = Enum.FillDirection.Horizontal
 	moveRowLayout.Padding = UDim.new(0, 8)
+	moveRowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 	moveRowLayout.Parent = moveRow
 
-	-- Input Box dynamically takes up the remaining width (100% minus 132px for the 3 buttons + padding)
-	createIconInputBox(moveRow, "rbxassetid://5172066892", Props.MoveStudsIncrement, trove, UDim2.new(1, -132, 1, 0))
-	createQuickButton(moveRow, "1", 1, Props.MoveStudsIncrement)
-	createQuickButton(moveRow, "0.5", 0.5, Props.MoveStudsIncrement)
-	createQuickButton(moveRow, "0.1", 0.1, Props.MoveStudsIncrement)
+	local moveIcon = Instance.new("ImageLabel")
+	moveIcon.Size = UDim2.new(0, 16, 0, 16)
+	moveIcon.BackgroundTransparency = 1
+	moveIcon.Image = "rbxassetid://5172066892"
+	moveIcon.ImageColor3 = THEME.TextMuted
+	moveIcon.Parent = moveRow
+
+	createEditableSegmentedControl(
+		moveRow,
+		{ 0, 0.1, 0.5, 1 },
+		"%s",
+		Props.MoveStudsIncrement,
+		trove,
+		UDim2.new(1, -24, 1, 0) -- Fill remaining space (100% minus 16px icon + 8px padding)
+	)
 
 	-- Row 2: Rotation Degree Increment
 	local rotRow = createFrame(movementSettingsContainer, {
@@ -747,18 +802,24 @@ function Widget.Init(plugin, trove)
 	local rotRowLayout = Instance.new("UIListLayout")
 	rotRowLayout.FillDirection = Enum.FillDirection.Horizontal
 	rotRowLayout.Padding = UDim.new(0, 8)
+	rotRowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 	rotRowLayout.Parent = rotRow
 
-	createIconInputBox(
+	local rotIcon = Instance.new("ImageLabel")
+	rotIcon.Size = UDim2.new(0, 16, 0, 16)
+	rotIcon.BackgroundTransparency = 1
+	rotIcon.Image = "rbxassetid://86084882582277"
+	rotIcon.ImageColor3 = THEME.TextMuted
+	rotIcon.Parent = rotRow
+
+	createEditableSegmentedControl(
 		rotRow,
-		"rbxassetid://86084882582277",
+		{ 0, 1, 45, 90 },
+		"%s°",
 		Props.RotationDegIncrement,
 		trove,
-		UDim2.new(1, -132, 1, 0)
+		UDim2.new(1, -24, 1, 0)
 	)
-	createQuickButton(rotRow, "1°", 1, Props.RotationDegIncrement)
-	createQuickButton(rotRow, "10°", 10, Props.RotationDegIncrement)
-	createQuickButton(rotRow, "45°", 45, Props.RotationDegIncrement)
 
 	-- Margin between move/rotate rows and tools row
 	createFrame(transformSection, {
@@ -833,9 +894,26 @@ function Widget.Init(plugin, trove)
 	local alignContainer, alignRow = createRow(snappingCard, "Align")
 	createToggle(alignContainer, "Match rotation to surface", Props.MatchRotationToSurface, trove)
 
-	local gridRowContainer, gridRow = createRow(snappingCard, "Grid Size")
-	createScrubInput(gridRowContainer, Props.GridSize, 0.1, 100, 0.1, trove, pluginGui)
+	-- UPDATED: Split Grid row for both Grid Size (Studs) and Rotation Grid (Degrees)
+	local gridRowContainer, gridRow = createRow(snappingCard, "Grid / Rot")
 
+	-- Left half for Grid Size
+	local gridLeftContainer = createFrame(gridRowContainer, {
+		Size = UDim2.new(0.5, -4, 1, 0),
+		BackgroundTransparency = 1,
+	})
+
+	-- Right half for Rotation Grid Degrees
+	local gridRightContainer = createFrame(gridRowContainer, {
+		Size = UDim2.new(0.5, -4, 1, 0),
+		Position = UDim2.new(0.5, 4, 0, 0),
+		BackgroundTransparency = 1,
+	})
+
+	createScrubInput(gridLeftContainer, Props.GridSize, 0.1, 100, 0.1, nil, trove, pluginGui)
+	createScrubInput(gridRightContainer, Props.RotationGridDeg, 0, 360, 1, "%s°", trove, pluginGui)
+
+	-- Toggle visibility based on SnappingMode
 	trove:Add(Props.SnappingMode:Observe(function(snapModeValue)
 		alignRow.Visible = (snapModeValue == Enums.SnappingMode.Surface)
 		gridRow.Visible = (snapModeValue == Enums.SnappingMode.Grid)
@@ -909,9 +987,10 @@ function Widget.Init(plugin, trove)
 		eyedropperBtn.ImageColor3 = THEME.TextMuted
 	end)
 
-	-- Trigger Eyedropper behavior when clicked
+	-- Trigger Eyedropper behavior when clicked (NOW PASSES MATERIAL PREFERENCE)
 	eyedropperBtn.MouseButton1Click:Connect(function()
-		ColorBehavior.StartEyedropperTool(plugin)
+		local shouldSelectMaterial = Props.SelectMaterial and Props.SelectMaterial:Get() or false
+		ColorBehavior.StartEyedropperTool(plugin, shouldSelectMaterial)
 	end)
 
 	trove:Add(Props.ActiveColor:Observe(function(newColor)
@@ -919,6 +998,11 @@ function Widget.Init(plugin, trove)
 			colorSwatch.BackgroundColor3 = newColor
 		end
 	end))
+
+	-- NEW: "Select Material" Checkmark/Toggle Option
+	local eyedropperOptContainer, eyedropperOptRow = createRow(colorSection, "Material")
+	eyedropperOptRow.LayoutOrder = 2
+	createToggle(eyedropperOptContainer, "Pick Material", Props.SelectMaterial, trove)
 
 	-- Disabled Selection Message (Hidden by default)
 	local disabledMessage = createText(colorSection, {
@@ -929,7 +1013,7 @@ function Widget.Init(plugin, trove)
 		TextXAlignment = Enum.TextXAlignment.Center,
 		TextYAlignment = Enum.TextYAlignment.Center,
 		Font = Enum.Font.Gotham,
-		LayoutOrder = 2,
+		LayoutOrder = 3, -- Adjusted LayoutOrder
 		Visible = false,
 	})
 
@@ -940,7 +1024,7 @@ function Widget.Init(plugin, trove)
 		BackgroundColor3 = THEME.Background,
 		BorderColor3 = THEME.Border,
 		BorderSizePixel = 1,
-		LayoutOrder = 3,
+		LayoutOrder = 4, -- Adjusted LayoutOrder
 	})
 	local hexPadding = Instance.new("UIPadding")
 	hexPadding.PaddingTop = UDim.new(0, 8)
@@ -974,7 +1058,7 @@ function Widget.Init(plugin, trove)
 		BackgroundColor3 = THEME.Background,
 		BorderColor3 = THEME.Border,
 		BorderSizePixel = 1,
-		LayoutOrder = 4,
+		LayoutOrder = 5, -- Adjusted LayoutOrder
 	})
 	local rgbPadding = Instance.new("UIPadding")
 	rgbPadding.PaddingTop = UDim.new(0, 8)
@@ -1010,7 +1094,7 @@ function Widget.Init(plugin, trove)
 		BackgroundColor3 = THEME.Background,
 		BorderColor3 = THEME.Border,
 		BorderSizePixel = 1,
-		LayoutOrder = 5,
+		LayoutOrder = 6, -- Adjusted LayoutOrder
 	})
 	local hsvPadding = Instance.new("UIPadding")
 	hsvPadding.PaddingTop = UDim.new(0, 8)
@@ -1050,6 +1134,7 @@ function Widget.Init(plugin, trove)
 			hsvContainer.Visible = true
 			colorSwatch.Visible = true
 			eyedropperBtn.Visible = true
+			eyedropperOptRow.Visible = true -- Also hide/show the new material setting
 		else
 			disabledMessage.Text = reason
 			disabledMessage.Visible = true
@@ -1058,6 +1143,7 @@ function Widget.Init(plugin, trove)
 			hsvContainer.Visible = false
 			colorSwatch.Visible = false
 			eyedropperBtn.Visible = false
+			eyedropperOptRow.Visible = false
 		end
 	end))
 
@@ -1082,8 +1168,12 @@ function Widget.Init(plugin, trove)
 
 	local advancedRowContainer, advancedRow = createRow(advancedSection, "Keybinds")
 	createToggle(advancedRowContainer, "Swap Y and Z keybinds", Props.SwapYandZKeybinds, trove)
-	local advancedRowContainer2, advancedRow = createRow(advancedSection, "Keybinds")
-	createToggle(advancedRowContainer2, "Origins Only", Props.OriginsOnly, trove)
+
+	local advancedRowContainer2, advancedRow = createRow(advancedSection, "Origins")
+	createToggle(advancedRowContainer2, "Transform Origins Only", Props.OriginsOnly, trove)
+
+	local advancedRowContainer2, advancedRow = createRow(advancedSection, "Snapping Keybinds")
+	createToggle(advancedRowContainer2, "Ctrl switches snapping modes", Props.CtrlWhileSnappingIsOnSwitchesMode, trove)
 end
 
 return Widget

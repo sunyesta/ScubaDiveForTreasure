@@ -10,7 +10,8 @@ local AssetOperations = require(script.Parent.Tools.AssetOperations)
 local ReplaceMesh = require(script.Parent.Tools.ReplaceMesh)
 local AutoPrimaryPart = require(script.Parent.Tools.AutoPrimaryPart)
 local SelectSimilar = require(script.Parent.Tools.SelectSimilar)
-local AspectRatioResizer = require(script.Parent.Tools.AspectRatioResizer) -- NEW REQUIRED MODULE
+local AspectRatioResizer = require(script.Parent.Tools.AspectRatioResizer)
+local MoveTool = require(script.Parent.Tools.MoveTool) -- NEW REQUIRED MODULE
 
 local THEME = Config.THEME
 local ICONS = Config.ICONS
@@ -169,6 +170,10 @@ function Widget.Init(plugin: Plugin, pluginTrove: any)
 	-- [[ 4G. ASPECT RATIO RESIZER SECTION ]] --
 	local aspectSection = AspectRatioResizer.Create()
 	aspectSection.Parent = scrollFrame
+
+	-- [[ 4H. MOVE TOOL SECTION ]] --
+	local moveToolSection = MoveTool.Create()
+	moveToolSection.Parent = scrollFrame
 
 	-- [[ 5. ASSEMBLE WIDGET ]] --
 	header.Parent = mainContainer

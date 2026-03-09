@@ -103,4 +103,11 @@ function OxygenController.Kill()
 		end)
 	end
 end
+
+function OxygenController.IncrementOxygen(amount)
+	OxygenController.Oxygen:Update(function(oxygen)
+		return math.clamp(oxygen + amount, 0, MaxOxygen:Get())
+	end)
+end
+
 return OxygenController

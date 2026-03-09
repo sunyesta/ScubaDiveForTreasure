@@ -9,9 +9,10 @@ return {
 	Axis = Property.new(Enums.Axis.Global),
 	Origin = Property.new(Enums.Origin.Pivot),
 	UseSnapping = Property.new(false),
-	SnappingMode = Property.new(Enums.SnappingMode.Grid),
+	SnappingMode = Property.new(Enums.SnappingMode.Surface),
 	MatchRotationToSurface = Property.new(false),
 	GridSize = Property.new(3),
+	RotationGridDeg = Property.new(0),
 	ActiveColor = Property.new(Color3.new()),
 	SelectedObjects = Property.new({}),
 	SelectedParts = Property.new({}),
@@ -22,4 +23,6 @@ return {
 	RotationDegIncrement = Property.new(0),
 	HideGizmos = Property.new(false),
 	OriginsOnly = Property.new(false),
+	CtrlWhileSnappingIsOnSwitchesMode = Property.new(true),
+	StartMoveingAfterDuplication = Property.new(true),
 }

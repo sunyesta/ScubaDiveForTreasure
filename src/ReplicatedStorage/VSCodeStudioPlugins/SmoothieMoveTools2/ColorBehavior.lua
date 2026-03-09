@@ -22,12 +22,29 @@ function ColorBehavior.Init(plugin: Plugin, pluginTrove: any): ()
 	-- We add a startup flag to prevent the default state from overwriting parts on load
 	local isInitializing = true
 
+	-- Store our connection to the currently active part's color changes
+	local activePartColorConnection: RBXScriptConnection? = nil
+
 	-- 1. Observe when the ActivePart changes and bind it to the main Trove
 	pluginTrove:Add(Props.ActivePart:Observe(function(newActivePart: Instance?)
+		-- Disconnect the old listener if we had one from a previously selected part
+		if activePartColorConnection then
+			activePartColorConnection:Disconnect()
+			activePartColorConnection = nil
+		end
+
 		if newActivePart and newActivePart:IsA("BasePart") then
 			isSyncingColor = true
 			Props.ActiveColor:Set(newActivePart.Color)
 			isSyncingColor = false
+
+			-- NEW: Listen for manual color changes from the Roblox Properties window
+			activePartColorConnection = newActivePart:GetPropertyChangedSignal("Color"):Connect(function()
+				-- We use the syncing flag so Observer 2 ignores this update and doesn't loop
+				isSyncingColor = true
+				Props.ActiveColor:Set(newActivePart.Color)
+				isSyncingColor = false
+			end)
 		end
 	end))
 
@@ -47,6 +64,13 @@ function ColorBehavior.Init(plugin: Plugin, pluginTrove: any): ()
 			end
 		end
 	end))
+
+	-- Cleanup the color connection if the plugin is entirely disabled/destroyed
+	pluginTrove:Add(function()
+		if activePartColorConnection then
+			activePartColorConnection:Disconnect()
+		end
+	end)
 
 	isInitializing = false
 end
@@ -68,8 +92,8 @@ function ColorBehavior.ValidateSelectionForColoring(): (boolean, string?)
 	return true, nil
 end
 
--- Activates the Eyedropper tool to pick a color from the Workspace
-function ColorBehavior.StartEyedropperTool(plugin: Plugin)
+-- Activates the Eyedropper tool to pick a color (and optionally material) from the Workspace
+function ColorBehavior.StartEyedropperTool(plugin: Plugin, selectMaterial: boolean?)
 	assert(moduleTrove, "ColorBehavior.Init() must be called with a Trove before using the Eyedropper tool!")
 
 	local previousTool = plugin:GetSelectedRibbonTool()
@@ -158,6 +182,23 @@ function ColorBehavior.StartEyedropperTool(plugin: Plugin)
 			if activeHoverPart then
 				pickedSuccessfully = true
 				Props.ActiveColor:Set(activeHoverPart.Color)
+
+				-- NEW: Apply material if the checkbox/toggle is enabled
+				if selectMaterial then
+					local selectedObjects = Props.SelectedObjects:Get()
+					if selectedObjects then
+						for _, object in ipairs(selectedObjects) do
+							if object:IsA("BasePart") then
+								object.Material = activeHoverPart.Material
+							end
+						end
+					end
+
+					-- Update ActiveMaterial prop if it exists in your architecture
+					if Props.ActiveMaterial then
+						Props.ActiveMaterial:Set(activeHoverPart.Material)
+					end
+				end
 
 				-- Destroys the UI, disconnects all events, and runs our custom cleanup function
 				toolTrove:Destroy()

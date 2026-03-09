@@ -14,6 +14,7 @@ local SelectionBehavior = require(script.Parent.SelectionBehavior)
 
 -- Configuration
 local TRACKBALL_SENSITIVITY = 5
+local PRECISION_MULTIPLIER = 0.1 -- Scales movement and snapping down to 10% when Shift is held
 
 local MoveAndRotateBehavior = {}
 
@@ -28,6 +29,74 @@ local function SnapToGrid(value: number, step: number): number
 		return value
 	end
 	return math.round(value / step) * step
+end
+
+-- Evaluates both the min and max edges of the bounding box along an axis,
+-- returning the pivot position that aligns the nearest edge to the grid.
+local function SnapToGridByEdge(targetPos: number, extentsMin: number, extentsMax: number, step: number): number
+	if step <= 0 then
+		return targetPos
+	end
+
+	-- Calculate where the pivot would be if we snapped the min edge
+	local snapMin = SnapToGrid(targetPos + extentsMin, step) - extentsMin
+	-- Calculate where the pivot would be if we snapped the max edge
+	local snapMax = SnapToGrid(targetPos + extentsMax, step) - extentsMax
+
+	-- Pick the one that keeps the pivot closest to the requested targetPos
+	if math.abs(snapMin - targetPos) < math.abs(snapMax - targetPos) then
+		return snapMin
+	else
+		return snapMax
+	end
+end
+
+-- Calculates the world-space offsets from the origin position to the edges of the bounding box.
+local function CalculateWorldExtents(parts: { Instance }, originPos: Vector3): (Vector3, Vector3)
+	local minX, minY, minZ = math.huge, math.huge, math.huge
+	local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+	local hasParts = false
+
+	for _, part in ipairs(parts) do
+		if part:IsA("BasePart") then
+			hasParts = true
+			local size = part.Size
+			local cf = part.CFrame
+			local hX, hY, hZ = size.X / 2, size.Y / 2, size.Z / 2
+
+			-- Calculate all 8 corners of the rotated part in world space
+			local corners = {
+				cf * Vector3.new(hX, hY, hZ),
+				cf * Vector3.new(-hX, hY, hZ),
+				cf * Vector3.new(hX, -hY, hZ),
+				cf * Vector3.new(-hX, -hY, hZ),
+				cf * Vector3.new(hX, hY, -hZ),
+				cf * Vector3.new(-hX, hY, -hZ),
+				cf * Vector3.new(hX, -hY, -hZ),
+				cf * Vector3.new(-hX, -hY, -hZ),
+			}
+
+			-- Expand the axis-aligned bounding box to include these corners
+			for _, corner in ipairs(corners) do
+				minX = math.min(minX, corner.X)
+				minY = math.min(minY, corner.Y)
+				minZ = math.min(minZ, corner.Z)
+				maxX = math.max(maxX, corner.X)
+				maxY = math.max(maxY, corner.Y)
+				maxZ = math.max(maxZ, corner.Z)
+			end
+		end
+	end
+
+	if not hasParts then
+		return Vector3.zero, Vector3.zero
+	end
+
+	-- Return the offsets relative to the origin position
+	local minExtents = Vector3.new(minX, minY, minZ) - originPos
+	local maxExtents = Vector3.new(maxX, maxY, maxZ) - originPos
+
+	return minExtents, maxExtents
 end
 
 local function LineToPlaneIntersection(
@@ -116,6 +185,9 @@ local function TranslateDragStyle(
 )
 	local selectedParts = Props.SelectedParts:Get()
 
+	-- Pre-calculate bounding box extents for edge-based snapping
+	local minExtents, maxExtents = CalculateWorldExtents(selectedParts, initialOrigin.Position)
+
 	local snapRaycastParams = RaycastParams.new()
 	snapRaycastParams.FilterType = Enum.RaycastFilterType.Exclude
 	snapRaycastParams.FilterDescendantsInstances = selectedParts
@@ -145,11 +217,16 @@ local function TranslateDragStyle(
 		initialHit = calculateHit(initialMouseRay)
 	end
 
+	-- Accumulators for frame-by-frame precision scaling
+	local lastHit: Vector3? = nil
+	local virtualHit: Vector3? = nil
+
 	return function(_adjustedMousePos: Vector2)
 		local useSnapping = Props.UseSnapping:Get()
 		local snappingMode = Props.SnappingMode:Get()
 		local currentRay = PluginMouse:GetRay()
 
+		-- We do not slow down Surface snapping, as it relies on raw Workspace geometry
 		if useSnapping and snappingMode == Enums.SnappingMode.Surface then
 			local result = Workspace:Raycast(currentRay.Origin, currentRay.Direction * 1000, snapRaycastParams)
 
@@ -178,25 +255,90 @@ local function TranslateDragStyle(
 			return nil
 		end
 
-		local delta = currentHit - initialHit
+		-- Initialize our accumulators on the first valid frame
+		if not lastHit or not virtualHit then
+			lastHit = currentHit
+			virtualHit = currentHit
+		end
+
+		-- Calculate frame-by-frame movement
+		local rawDelta = currentHit - lastHit
+		lastHit = currentHit
+
+		local isPrecision = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+			or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+
 		local moveStep = Props.MoveStudsIncrement:Get()
+		local isGridSnap = false
 
 		if useSnapping and snappingMode == Enums.SnappingMode.Grid then
 			moveStep = Props.GridSize:Get()
+			isGridSnap = true
 		end
 
-		if moveStep > 0 then
-			if dragAxis1 and dragAxis2 then
-				local rightDot = SnapToGrid(delta:Dot(dragAxis1), moveStep)
-				local upDot = SnapToGrid(delta:Dot(dragAxis2), moveStep)
-				delta = (dragAxis1 * rightDot) + (dragAxis2 * upDot)
-			elseif dragAxis1 then
-				local dot = SnapToGrid(delta:Dot(dragAxis1), moveStep)
-				delta = dragAxis1 * dot
+		-- Apply precision multiplier to movement and snapping increments
+		if isPrecision then
+			rawDelta *= PRECISION_MULTIPLIER
+			if moveStep > 0 then
+				moveStep *= PRECISION_MULTIPLIER
 			end
 		end
 
-		return CFrame.new(initialOrigin.Position + delta) * initialOrigin.Rotation
+		-- Apply the scaled delta to our virtual tracking position
+		virtualHit += rawDelta
+
+		local delta = virtualHit - initialHit
+
+		if moveStep > 0 then
+			if isGridSnap then
+				-- ABSOLUTE GRID SNAPPING (WITH EDGE CALCULATION)
+				local absoluteTargetPos = initialOrigin.Position + delta
+
+				local snappedWorldPos = Vector3.new(
+					SnapToGridByEdge(absoluteTargetPos.X, minExtents.X, maxExtents.X, moveStep),
+					SnapToGridByEdge(absoluteTargetPos.Y, minExtents.Y, maxExtents.Y, moveStep),
+					SnapToGridByEdge(absoluteTargetPos.Z, minExtents.Z, maxExtents.Z, moveStep)
+				)
+
+				if dragAxis1 and dragAxis2 then
+					-- Project snappedWorldPos back onto the drag plane to ensure we don't violate constraints
+					local planeNormal = dragAxis1:Cross(dragAxis2).Unit
+					local v = snappedWorldPos - initialOrigin.Position
+					local dist = v:Dot(planeNormal)
+					local projectedPos = snappedWorldPos - (planeNormal * dist)
+
+					delta = projectedPos - initialOrigin.Position
+				elseif dragAxis1 then
+					-- Project snappedWorldPos back onto the drag line to ensure we don't violate constraints
+					local projectedPos = ClosestPointFromPointToLine(snappedWorldPos, initialOrigin.Position, dragAxis1)
+
+					delta = projectedPos - initialOrigin.Position
+				end
+			else
+				-- RELATIVE POSITION SNAPPING (MoveStudsIncrement)
+				if dragAxis1 and dragAxis2 then
+					local rightDot = SnapToGrid(delta:Dot(dragAxis1), moveStep)
+					local upDot = SnapToGrid(delta:Dot(dragAxis2), moveStep)
+					delta = (dragAxis1 * rightDot) + (dragAxis2 * upDot)
+				elseif dragAxis1 then
+					local dot = SnapToGrid(delta:Dot(dragAxis1), moveStep)
+					delta = dragAxis1 * dot
+				end
+			end
+		end
+
+		-- APPLY FINAL GRID SNAPPING OVERRIDE (WITH EDGE CALCULATION)
+		local targetPosition = initialOrigin.Position + delta
+
+		if isGridSnap and moveStep > 0 then
+			targetPosition = Vector3.new(
+				SnapToGridByEdge(targetPosition.X, minExtents.X, maxExtents.X, moveStep),
+				SnapToGridByEdge(targetPosition.Y, minExtents.Y, maxExtents.Y, moveStep),
+				SnapToGridByEdge(targetPosition.Z, minExtents.Z, maxExtents.Z, moveStep)
+			)
+		end
+
+		return CFrame.new(targetPosition) * initialOrigin.Rotation
 	end
 end
 
@@ -217,6 +359,45 @@ local function RotateDragStyle(
 
 	local rotatePlaneNormal = getRotatePlaneNormal()
 
+	-- Calculates the part's initial rotation on the active plane relative to a strict 0-degree angle
+	local function getInitialAbsoluteAngle(): number
+		local right = initialOrigin.RightVector
+		local up = initialOrigin.UpVector
+		local look = initialOrigin.LookVector
+
+		-- Find the local axis most orthogonal to the rotation plane
+		local bestVector = right
+		local minDot = math.abs(right:Dot(rotatePlaneNormal))
+
+		if math.abs(up:Dot(rotatePlaneNormal)) < minDot then
+			bestVector = up
+			minDot = math.abs(up:Dot(rotatePlaneNormal))
+		end
+
+		if math.abs(look:Dot(rotatePlaneNormal)) < minDot then
+			bestVector = look
+		end
+
+		-- Project the selected vector flat onto the plane
+		local projectedPartVector = (bestVector - bestVector:Dot(rotatePlaneNormal) * rotatePlaneNormal)
+		if projectedPartVector.Magnitude < 1e-5 then
+			return 0
+		end
+		projectedPartVector = projectedPartVector.Unit
+
+		-- Create a stable global reference vector on this plane to act as '0 degrees'
+		local globalRef = Vector3.yAxis
+		if math.abs(rotatePlaneNormal:Dot(globalRef)) > 0.99 then
+			globalRef = Vector3.xAxis
+		end
+		local referenceZeroVector = globalRef:Cross(rotatePlaneNormal).Unit
+
+		-- Measure offset from global 0 to local rotation phase
+		return GetSignedAngleBetweenVectors(referenceZeroVector, projectedPartVector, rotatePlaneNormal)
+	end
+
+	local initialAbsoluteAngle = getInitialAbsoluteAngle()
+
 	local function getPlaneHit(mouseRay: Ray)
 		return LineToPlaneIntersection(mouseRay.Origin, mouseRay.Direction, initialOrigin.Position, rotatePlaneNormal)
 	end
@@ -225,6 +406,10 @@ local function RotateDragStyle(
 	if initialMouseRay then
 		initialPlaneHit = getPlaneHit(initialMouseRay)
 	end
+
+	-- Accumulators for fine-tuned rotation
+	local lastPlaneHit: Vector3? = nil
+	local accumulatedAngle: number = 0
 
 	return function(_adjustedMousePos: Vector2)
 		local currentRay = PluginMouse:GetRay()
@@ -243,23 +428,61 @@ local function RotateDragStyle(
 			return nil
 		end
 
-		local initialVector = (initialPlaneHit - initialOrigin.Position).Unit
-		local currentVector = (currentPlaneHit - initialOrigin.Position).Unit
-
-		if initialVector.Magnitude > 1e-6 and currentVector.Magnitude > 1e-6 then
-			local angle = GetSignedAngleBetweenVectors(initialVector, currentVector, rotatePlaneNormal)
-			local rotStep = Props.RotationDegIncrement:Get()
-
-			if rotStep > 0 then
-				angle = SnapToGrid(angle, math.rad(rotStep))
-			end
-
-			return CFrame.new(initialOrigin.Position)
-				* CFrame.fromAxisAngle(rotatePlaneNormal, angle)
-				* initialOrigin.Rotation
+		if not lastPlaneHit then
+			lastPlaneHit = currentPlaneHit
 		end
 
-		return nil
+		local lastVector = (lastPlaneHit - initialOrigin.Position).Unit
+		local currentVector = (currentPlaneHit - initialOrigin.Position).Unit
+		lastPlaneHit = currentPlaneHit
+
+		local frameAngle = 0
+		if lastVector.Magnitude > 1e-6 and currentVector.Magnitude > 1e-6 then
+			frameAngle = GetSignedAngleBetweenVectors(lastVector, currentVector, rotatePlaneNormal)
+		end
+
+		local isPrecision = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+			or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+
+		-- Handle Snapping State Overrides
+		local useSnapping = Props.UseSnapping:Get()
+		local snappingMode = Props.SnappingMode:Get()
+
+		local rotStep = Props.RotationDegIncrement:Get()
+		local isGridSnap = false
+
+		-- Override rotStep with the rotation grid size if grid snapping is active
+		if useSnapping and snappingMode == Enums.SnappingMode.Grid then
+			rotStep = Props.RotationGridDeg:Get()
+			isGridSnap = true
+		end
+
+		-- Scale down rotation speed and snapping degrees if Shift is held
+		if isPrecision then
+			frameAngle *= PRECISION_MULTIPLIER
+			if rotStep > 0 then
+				rotStep *= PRECISION_MULTIPLIER
+			end
+		end
+
+		accumulatedAngle += frameAngle
+		local finalAngle = accumulatedAngle
+
+		if rotStep > 0 then
+			if isGridSnap then
+				-- Absolute Grid Snapping
+				local absoluteAngle = initialAbsoluteAngle + accumulatedAngle
+				local snappedAbsoluteAngle = SnapToGrid(absoluteAngle, math.rad(rotStep))
+				finalAngle = snappedAbsoluteAngle - initialAbsoluteAngle
+			else
+				-- Relative Incremental Snapping
+				finalAngle = SnapToGrid(finalAngle, math.rad(rotStep))
+			end
+		end
+
+		return CFrame.new(initialOrigin.Position)
+			* CFrame.fromAxisAngle(rotatePlaneNormal, finalAngle)
+			* initialOrigin.Rotation
 	end
 end
 
@@ -293,6 +516,10 @@ local function TrackballDragStyle(initialOrigin: CFrame, initialMousePos: Vector
 		vStart = projectToSphere(initialMousePos)
 	end
 
+	-- Accumulator to cleanly slow down relative mouse tracking
+	local lastMousePos: Vector2? = nil
+	local accumulatedRotation = CFrame.identity
+
 	return function(_adjustedMousePos: Vector2)
 		local currentMousePos = PluginMouse:GetPosition()
 
@@ -303,26 +530,35 @@ local function TrackballDragStyle(initialOrigin: CFrame, initialMousePos: Vector
 			end
 		end
 
-		local startVec = vStart :: Vector3
+		if not lastMousePos then
+			lastMousePos = currentMousePos
+		end
+
+		local vLast = projectToSphere(lastMousePos)
 		local vCurrent = projectToSphere(currentMousePos)
+		lastMousePos = currentMousePos
 
-		local dot = math.clamp(startVec:Dot(vCurrent), -1, 1)
-		local angle = math.acos(dot) * TRACKBALL_SENSITIVITY
+		local dot = math.clamp(vLast:Dot(vCurrent), -1, 1)
+		local frameAngle = math.acos(dot) * TRACKBALL_SENSITIVITY
 
-		if angle < 1e-5 then
-			return initialOrigin
+		if frameAngle > 1e-5 then
+			local axisCamSpace = vLast:Cross(vCurrent)
+			if axisCamSpace.Magnitude > 1e-5 then
+				axisCamSpace = axisCamSpace.Unit
+				local axisWorld = cam.CFrame:VectorToWorldSpace(axisCamSpace)
+
+				local isPrecision = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+					or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+				if isPrecision then
+					frameAngle *= PRECISION_MULTIPLIER
+				end
+
+				local rotationDelta = CFrame.fromAxisAngle(axisWorld, frameAngle)
+				accumulatedRotation = rotationDelta * accumulatedRotation
+			end
 		end
 
-		local axisCamSpace = startVec:Cross(vCurrent)
-		if axisCamSpace.Magnitude < 1e-5 then
-			return initialOrigin
-		end
-		axisCamSpace = axisCamSpace.Unit
-
-		local axisWorld = cam.CFrame:VectorToWorldSpace(axisCamSpace)
-		local rotationDelta = CFrame.fromAxisAngle(axisWorld, angle)
-
-		return CFrame.new(initialOrigin.Position) * rotationDelta * initialOrigin.Rotation
+		return CFrame.new(initialOrigin.Position) * accumulatedRotation * initialOrigin.Rotation
 	end
 end
 

@@ -44,8 +44,6 @@ function TreasureClient:Construct()
 	self._CommObject = self._Comm:BuildObject()
 
 	self._LockedPlayer = self._Comm:GetProperty("LockedPlayer")
-
-	self._GrabProximityPrompt = CreateProximityPrompt(self.Instance, "Grab", 2)
 	self._AttachedPlayerName = Property.BindToAttribute(self.Instance, "_AttachedPlayerName", nil)
 
 	self._InputTrove = self._Trove:Extend()
@@ -72,6 +70,12 @@ function TreasureClient:Start()
 end
 
 function TreasureClient:Loaded(rootPart, trove)
+	-- Cache the streamed part to avoid relying on Model.PrimaryPart
+	self._RootPart = rootPart
+
+	-- Create the prompt strictly on the physical part that just loaded
+	self._GrabProximityPrompt = trove:Add(CreateProximityPrompt(self._RootPart, "Grab", 2))
+
 	self._HitSounds = {}
 
 	for _, hitSound in hitSounds do
@@ -99,6 +103,9 @@ function TreasureClient:Loaded(rootPart, trove)
 	end))
 
 	self:_SetupBounceSounds(rootPart, trove)
+
+	-- Run an initial state update in case attributes loaded before the part
+	self:_UpdateState()
 end
 
 function TreasureClient:Stop()
@@ -106,6 +113,11 @@ function TreasureClient:Stop()
 end
 
 function TreasureClient:_UpdateState()
+	-- Safety check in case UpdateState is triggered before Loaded finishes
+	if not self._GrabProximityPrompt then
+		return
+	end
+
 	if self._Claimed then
 		self._GrabProximityPrompt.Enabled = false
 		return
@@ -140,8 +152,9 @@ function TreasureClient:_UpdateState()
 			end
 		end))
 	else
-		if self.Instance.PrimaryPart then
-			TreasureUtils.Detach(self.Instance.PrimaryPart)
+		local primaryPart = self._RootPart or self.Instance.PrimaryPart
+		if primaryPart then
+			TreasureUtils.Detach(primaryPart)
 		end
 
 		if not isLockedByMe then
@@ -152,6 +165,9 @@ function TreasureClient:_UpdateState()
 end
 
 function TreasureClient:_Grab()
+	if not self._GrabProximityPrompt then
+		return
+	end
 	self.GrabSound:Play()
 
 	if os.clock() - self._lastDropTime < 2 then
@@ -162,7 +178,7 @@ function TreasureClient:_Grab()
 	self._BuoyancyTrove:Clean()
 	self._GrabTrove:Clean()
 
-	local primaryPart = self.Instance.PrimaryPart
+	local primaryPart = self._RootPart or self.Instance.PrimaryPart
 	if not primaryPart then
 		return
 	end
@@ -187,8 +203,9 @@ function TreasureClient:_Grab()
 	local preGrabTrove = self._GrabTrove:Extend()
 	if proxyPart then
 		preGrabTrove:Add(RunService.RenderStepped:Connect(function()
-			if self.Instance.PrimaryPart then
-				self.Instance.PrimaryPart.CFrame = proxyPart.CFrame
+			local part = self._RootPart or self.Instance.PrimaryPart
+			if part then
+				part.CFrame = proxyPart.CFrame
 			end
 		end))
 	end
@@ -201,9 +218,10 @@ function TreasureClient:_Grab()
 			return
 		end
 
-		if self.Instance.PrimaryPart and proxyPart then
+		local part = self._RootPart or self.Instance.PrimaryPart
+		if part and proxyPart then
 			self._lastGrabTime = os.clock()
-			TreasureUtils.Attach(self.Instance.PrimaryPart, Player.Character, proxyPart)
+			TreasureUtils.Attach(part, Player.Character, proxyPart)
 			self:_SetupCollisionDrop()
 		end
 	end)
@@ -237,7 +255,7 @@ function TreasureClient:_SetupBounceSounds(rootPart, trove)
 end
 
 function TreasureClient:_SetupCollisionDrop()
-	local primaryPart = self.Instance.PrimaryPart
+	local primaryPart = self._RootPart or self.Instance.PrimaryPart
 	if not primaryPart then
 		return
 	end
@@ -279,7 +297,7 @@ function TreasureClient:Release()
 
 	DropSound:Play()
 
-	local part = self.Instance.PrimaryPart
+	local part = self._RootPart or self.Instance.PrimaryPart
 
 	if part then
 		TreasureUtils.Detach(part)
@@ -319,13 +337,12 @@ function TreasureClient:Claim(depositInstance)
 	end
 
 	-- 2. Setup Animation
-	local primaryPart = self.Instance.PrimaryPart
+	local primaryPart = self._RootPart or self.Instance.PrimaryPart
 	if primaryPart and depositInstance then
 		TreasureUtils.Detach(primaryPart)
 		primaryPart.Anchored = true
 		primaryPart.CanCollide = false
 
-		-- Play sound if you have a specific success sound, otherwise DropSound works
 		self.TreasureClaimSound:Play()
 
 		local startCFrame = self.Instance:GetPivot()
@@ -336,13 +353,12 @@ function TreasureClient:Claim(depositInstance)
 		local startTime = os.clock()
 
 		-- 3. Animate Loop
-		-- Using task.spawn so we don't yield the main thread logic
 		task.spawn(function()
 			while true do
 				local elapsed = os.clock() - startTime
 				local alpha = math.clamp(elapsed / duration, 0, 1)
 
-				-- Easing: Quad In (Start slow, end fast - nice for "sucking" effect)
+				-- Easing: Quad In
 				local ease = alpha * alpha
 
 				-- Interpolate Position
@@ -351,9 +367,9 @@ function TreasureClient:Claim(depositInstance)
 				-- Add Spin (2 full rotations)
 				currentCF = currentCF * CFrame.Angles(0, math.rad(360 * 2 * ease), 0)
 
-				if self.Instance and self.Instance.PrimaryPart then
+				local part = self._RootPart or self.Instance.PrimaryPart
+				if self.Instance and part then
 					self.Instance:PivotTo(currentCF)
-					-- Shrink to 0.1 scale
 					self.Instance:ScaleTo(startScale * (1 - (ease * 0.9)))
 				else
 					break
@@ -371,7 +387,7 @@ function TreasureClient:Claim(depositInstance)
 				self.Instance:Destroy()
 			end
 
-			-- 5. Network & UI (Moved here so it doesn't destroy the part server-side too early)
+			-- 5. Network & UI
 			self._CommObject:Claim()
 			local loot = TreasureUtils.GetLoot(self)
 			LootRevealGui.DisplayLoot(loot)
@@ -387,8 +403,9 @@ end
 
 function TreasureClient:Break()
 	BreakSound:Play()
-	if self.Instance.PrimaryPart then
-		SpawnVisualEffect.WoodChips(self.Instance.PrimaryPart.Position, Color3.new(0.403921, 0.243137, 0.121568))
+	local primaryPart = self._RootPart or self.Instance.PrimaryPart
+	if primaryPart then
+		SpawnVisualEffect.WoodChips(primaryPart.Position, Color3.new(0.403921, 0.243137, 0.121568))
 	end
 	self.Instance:Destroy()
 	self._CommObject:Break()

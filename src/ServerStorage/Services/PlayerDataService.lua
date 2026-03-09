@@ -1,3 +1,4 @@
+--!strict
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
@@ -10,13 +11,15 @@ local Trove = require(ReplicatedStorage.Packages.Trove)
 local PlayerDataService = {}
 PlayerDataService.Profiles = {}
 
+-- 1. Added Inventory to the default Profile Template
 local PROFILE_TEMPLATE = {
 	Wins = 0,
+	Inventory = {},
 }
 
 local GameProfileStore = ProfileStore.New("PlayerStore", PROFILE_TEMPLATE)
 
-function PlayerDataService.LoadProfile(player)
+function PlayerDataService.LoadProfile(player: Player)
 	local profile = GameProfileStore:StartSessionAsync(tostring(player.UserId), {
 		Cancel = function()
 			return player.Parent ~= Players
@@ -27,10 +30,10 @@ function PlayerDataService.LoadProfile(player)
 		profile:AddUserId(player.UserId)
 		profile:Reconcile()
 
-		-- 1. Assign the profile to the table FIRST, so it exists for GetProfile
+		-- Assign the profile to the table FIRST, so it exists for GetProfile
 		PlayerDataService.Profiles[player] = profile
 
-		-- 2. Pass the profile explicitly to the bind function
+		-- Pass the profile explicitly to the bind function
 		local sessionTrove = PlayerDataService._BindPlayerContextToProfile(player, profile)
 
 		profile.OnSessionEnd:Connect(function()
@@ -52,11 +55,11 @@ function PlayerDataService.LoadProfile(player)
 	return nil
 end
 
-function PlayerDataService.GetProfile(player)
+function PlayerDataService.GetProfile(player: Player)
 	return PlayerDataService.Profiles[player]
 end
 
-function PlayerDataService.EndSession(player)
+function PlayerDataService.EndSession(player: Player)
 	local profile = PlayerDataService.Profiles[player]
 	if profile then
 		profile:EndSession()
@@ -64,13 +67,21 @@ function PlayerDataService.EndSession(player)
 	end
 end
 
--- Added 'profile' as an argument here
-function PlayerDataService._BindPlayerContextToProfile(player, profile)
+function PlayerDataService._BindPlayerContextToProfile(player: Player, profile: any)
 	local trove = Trove.new()
 
+	-- Bind Wins
 	PlayerContext.Client.Wins:SetFor(player, profile.Data.Wins)
 	trove:Add(PlayerContext.Client.Wins:ObserveFor(player, function(wins)
 		profile.Data.Wins = wins
+	end))
+
+	-- 2 & 3. Bind Inventory (Load initial data, then observe for changes)
+	PlayerContext.Client.Inventory:SetFor(player, profile.Data.Inventory)
+	trove:Add(PlayerContext.Client.Inventory:ObserveFor(player, function(inventory)
+		-- Whenever InventoryService calls :SetFor(), this observer fires
+		-- and updates the Profile data ready for the next auto-save.
+		profile.Data.Inventory = inventory
 	end))
 
 	return trove

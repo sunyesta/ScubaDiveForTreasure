@@ -44,7 +44,44 @@ function ReplaceMesh.Create(): CanvasGroup
 		textBox = inputContainer:FindFirstChild("TextBox") :: TextBox
 	end
 
-	-- 3. Create the OK Button
+	-- 3. Create the Current Mesh ID Display (Selectable Text Box)
+	local currentIdLabel = Instance.new("TextLabel")
+	currentIdLabel.Size = UDim2.new(1, 0, 0, 16)
+	currentIdLabel.BackgroundTransparency = 1
+	currentIdLabel.Text = "Current Selected Mesh ID:"
+	currentIdLabel.TextColor3 = Color3.new(1, 1, 1)
+	currentIdLabel.Font = Enum.Font.BuilderSansBold
+	currentIdLabel.TextSize = 14
+	currentIdLabel.TextXAlignment = Enum.TextXAlignment.Left
+	currentIdLabel.LayoutOrder = 2
+	currentIdLabel.Parent = body
+
+	local currentIdBox = Instance.new("TextBox")
+	currentIdBox.Name = "CurrentIdBox"
+	currentIdBox.Size = UDim2.new(1, 0, 0, 36)
+	-- Use a dark background to indicate it's a field
+	currentIdBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	currentIdBox.Text = "Select a Mesh..."
+	currentIdBox.TextColor3 = Color3.new(0.6, 0.6, 0.6)
+	currentIdBox.Font = Enum.Font.BuilderSans
+	currentIdBox.TextSize = 14
+	-- Setting TextEditable to false prevents typing but allows highlighting to copy!
+	currentIdBox.TextEditable = false
+	currentIdBox.ClearTextOnFocus = false
+	currentIdBox.TextXAlignment = Enum.TextXAlignment.Left
+	currentIdBox.LayoutOrder = 3
+	currentIdBox.Parent = body
+
+	local currentIdCorner = Instance.new("UICorner")
+	currentIdCorner.CornerRadius = UDim.new(0, 8)
+	currentIdCorner.Parent = currentIdBox
+
+	local currentIdPadding = Instance.new("UIPadding")
+	currentIdPadding.PaddingLeft = UDim.new(0, 12)
+	currentIdPadding.PaddingRight = UDim.new(0, 12)
+	currentIdPadding.Parent = currentIdBox
+
+	-- 4. Create the OK Button
 	local okBtn = Instance.new("TextButton")
 	okBtn.Name = "OKButton"
 	okBtn.Size = UDim2.new(1, 0, 0, 44)
@@ -53,7 +90,7 @@ function ReplaceMesh.Create(): CanvasGroup
 	okBtn.TextColor3 = Color3.new(1, 1, 1)
 	okBtn.Font = Enum.Font.BuilderSansMedium
 	okBtn.TextSize = 14
-	okBtn.LayoutOrder = 2
+	okBtn.LayoutOrder = 4 -- Updated LayoutOrder to sit beneath the current ID box
 
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0, 12)
@@ -61,7 +98,38 @@ function ReplaceMesh.Create(): CanvasGroup
 
 	okBtn.Parent = body
 
-	-- 4. Setup the Logic
+	-- 5. Track Studio Selection to update the Current ID Box
+	Selection.SelectionChanged:Connect(function()
+		local selectedInstances = Selection:Get()
+
+		if #selectedInstances == 1 then
+			local inst = selectedInstances[1]
+			if inst:IsA("MeshPart") or inst:IsA("SpecialMesh") then
+				-- We found a valid mesh, display its ID and make text white
+				currentIdBox.Text = inst.MeshId
+				currentIdBox.TextColor3 = Color3.new(1, 1, 1)
+			else
+				-- Selected something else (like a Part or Script)
+				currentIdBox.Text = "N/A (Not a Mesh)"
+				currentIdBox.TextColor3 = Color3.new(0.6, 0.6, 0.6)
+			end
+		elseif #selectedInstances > 1 then
+			currentIdBox.Text = "Multiple items selected"
+			currentIdBox.TextColor3 = Color3.new(0.6, 0.6, 0.6)
+		else
+			currentIdBox.Text = "Select a Mesh..."
+			currentIdBox.TextColor3 = Color3.new(0.6, 0.6, 0.6)
+		end
+	end)
+
+	-- Initialize the display state manually once when the UI loads
+	local initialSelection = Selection:Get()
+	if #initialSelection > 0 and (initialSelection[1]:IsA("MeshPart") or initialSelection[1]:IsA("SpecialMesh")) then
+		currentIdBox.Text = initialSelection[1].MeshId
+		currentIdBox.TextColor3 = Color3.new(1, 1, 1)
+	end
+
+	-- 6. Setup the Replacement Logic
 	okBtn.Activated:Connect(function()
 		if not textBox or textBox.Text == "" then
 			return
@@ -104,12 +172,6 @@ function ReplaceMesh.Create(): CanvasGroup
 						CollectionService:AddTag(newMeshPart, tag)
 					end
 
-					-- Copy physical and visual properties to the new MeshPart
-					-- If you use a custom Reflection module, you could do something like this:
-					-- for _, propName in ipairs(ReflectionService:GetProperties("MeshPart")) do
-					--     pcall(function() newMeshPart[propName] = instance[propName] end)
-					-- end
-
 					-- Without native reflection, we explicitly copy the known properties to be safe:
 					newMeshPart.Name = instance.Name
 					newMeshPart.Size = instance.Size
@@ -142,7 +204,7 @@ function ReplaceMesh.Create(): CanvasGroup
 
 					-- Add to our new selection table and destroy the old one
 					table.insert(newSelection, newMeshPart)
-					instance:Destroy()
+					instance.Parent = nil
 				else
 					warn("[Smoothie Move Tools] Failed to load new Mesh ID for MeshPart:", newId)
 					table.insert(newSelection, instance) -- Keep the original in selection if it failed

@@ -1,6 +1,6 @@
 local UserInputService = game:GetService("UserInputService")
 local Selection = game:GetService("Selection")
-local ReplicatedStorage = game:GetService("ReplicatedStorage") -- Added Service
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Props = require(script.Parent.Props)
 local Enums = require(script.Parent.Enums)
@@ -12,9 +12,11 @@ function ExtraBehavior.Init(plugin, pluginTrove)
 	-- Format: { [Instance] = ParentInstance }
 	local hiddenObjects = {}
 
-	-- State to keep track of the temporary snapping toggle
+	-- State to keep track of the temporary snapping toggles
 	local isCtrlHeld = false
+	local didSwitchMode = false -- Tracks if Ctrl toggled the mode instead of the state
 	local preCtrlSnappingState = false
+	local preCtrlSnappingMode = Enums.SnappingMode.Grid
 
 	-- Helper to get (or create) the temporary folder
 	local function getHiddenFolder()
@@ -50,15 +52,30 @@ function ExtraBehavior.Init(plugin, pluginTrove)
 
 	-- Handle Key Presses
 	local function onInputBegan(input, gameProcessedEvent)
-		-- We ignore gameProcessedEvent for plugins sometimes, but it's good practice to include it
-		-- However, in a plugin viewport, we usually want to catch the input anyway.
-
-		-- Ctrl for temporarily inverting Snapping state (Holding down)
+		-- Ctrl for temporarily inverting Snapping state OR Snapping Mode
 		if input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.RightControl then
 			if not isCtrlHeld then
 				isCtrlHeld = true
-				preCtrlSnappingState = Props.UseSnapping:Get()
-				Props.UseSnapping:Set(not preCtrlSnappingState)
+
+				local isSnappingOn = Props.UseSnapping:Get()
+				local switchModeSetting = Props.CtrlWhileSnappingIsOnSwitchesMode:Get()
+
+				-- If snapping is on AND the setting is enabled, switch modes (Grid <-> Surface)
+				if isSnappingOn and switchModeSetting then
+					didSwitchMode = true
+					preCtrlSnappingMode = Props.SnappingMode:Get()
+
+					-- Swap the mode
+					local newMode = (preCtrlSnappingMode == Enums.SnappingMode.Grid) and Enums.SnappingMode.Surface
+						or Enums.SnappingMode.Grid
+
+					Props.SnappingMode:Set(newMode)
+				else
+					-- Otherwise, do the standard Snapping State toggle
+					didSwitchMode = false
+					preCtrlSnappingState = isSnappingOn
+					Props.UseSnapping:Set(not preCtrlSnappingState)
+				end
 			end
 		end
 
@@ -96,7 +113,7 @@ function ExtraBehavior.Init(plugin, pluginTrove)
 
 	-- Handle Key Releases
 	local function onInputEnded(input, gameProcessedEvent)
-		-- Ctrl release to restore Snapping state
+		-- Ctrl release to restore Snapping state / mode
 		if input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.RightControl then
 			-- Ensure the user isn't holding the *other* control key before setting back
 			local leftCtrl = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
@@ -105,7 +122,13 @@ function ExtraBehavior.Init(plugin, pluginTrove)
 			if not leftCtrl and not rightCtrl then
 				if isCtrlHeld then
 					isCtrlHeld = false
-					Props.UseSnapping:Set(preCtrlSnappingState)
+
+					-- Restore whatever was changed based on our flag
+					if didSwitchMode then
+						Props.SnappingMode:Set(preCtrlSnappingMode)
+					else
+						Props.UseSnapping:Set(preCtrlSnappingState)
+					end
 				end
 			end
 		end

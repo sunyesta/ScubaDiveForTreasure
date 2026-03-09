@@ -7,6 +7,7 @@ local Lighting = game:GetService("Lighting")
 local SoundUtils = require(ReplicatedStorage.NonWallyPackages.SoundUtils)
 local Property = require(ReplicatedStorage.NonWallyPackages.Property)
 local PlayerUtils = require(ReplicatedStorage.NonWallyPackages.PlayerUtils)
+local Teleporter = require(ReplicatedStorage.Common.Components.Models.Teleporter)
 
 local Player = Players.LocalPlayer
 
@@ -70,7 +71,14 @@ WaterController.PlayerInWater = Property.new(false)
 WaterController.PlayerDepthPercentage = Property.new(0)
 
 function WaterController.GameStart()
-	WaterController.PlayerInWater:Set(true)
+	WaterController.PlayerInWater:Set(false)
+	Teleporter.Used:Connect(function(teleporterName)
+		if teleporterName == "Ocean" then
+			WaterController.PlayerInWater:Set(true)
+		elseif teleporterName == "Land" then
+			WaterController.PlayerInWater:Set(false)
+		end
+	end)
 
 	PlayerUtils.ObserveCharacterAdded(Player, function(character, characterTrove)
 		local rootPart = character:WaitForChild("HumanoidRootPart", 5)
@@ -83,13 +91,6 @@ function WaterController.GameStart()
 		-- ==========================================
 		characterTrove:Connect(RunService.Heartbeat, function()
 			local currentY = rootPart.Position.Y
-
-			-- 1. WATER LEVEL LOGIC
-			local isBelowWaterLevel = currentY < WATER_LEVEL
-
-			if WaterController.PlayerInWater:Get() ~= isBelowWaterLevel then
-				WaterController.PlayerInWater:Set(isBelowWaterLevel)
-			end
 
 			-- 2. DYNAMIC LIGHTING LOGIC
 			local clampedY = math.clamp(currentY, MIN_HEIGHT, MAX_HEIGHT)

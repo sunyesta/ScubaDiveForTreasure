@@ -9,6 +9,7 @@ local Streamable = require(ReplicatedStorage.Packages.Streamable).Streamable
 local CreateProximityPrompt = require(ReplicatedStorage.Common.Modules.GameUtils.CreateProximityPrompt)
 local OxygenController = require(ReplicatedStorage.Common.Controllers.OxygenController)
 local SoundUtils = require(ReplicatedStorage.NonWallyPackages.SoundUtils)
+local ClientComm = require(ReplicatedStorage.Packages.Comm).ClientComm
 
 local Player = Players.LocalPlayer
 
@@ -41,6 +42,7 @@ local OxygenCoral = Component.new({
 
 function OxygenCoral:Construct()
 	self._Trove = Trove.new()
+	self._Comm = ClientComm.new(self.Instance, true, "_Comm1"):BuildObject()
 end
 
 function OxygenCoral:Start()
@@ -62,11 +64,12 @@ function OxygenCoral:Loaded(rootPart: BasePart, trove)
 	local CollectPrompt: ProximityPrompt = trove:Add(CreateProximityPrompt(rootPart, "Collect"))
 
 	trove:Add(CollectPrompt.Triggered:Connect(function()
-		OxygenController.Oxygen:Update(function(oxygen: number)
-			return oxygen + Config.OxygenReward
-		end)
+		-- OxygenController.Oxygen:Update(function(oxygen: number)
+		-- 	return oxygen + Config.OxygenReward
+		-- end)
 
-		self.Instance:Destroy()
+		-- self.Instance:Destroy()
+		self._Comm:Harvest()
 	end))
 
 	local BubbleTemplate: BasePart = self.Instance:WaitForChild("Bubble")

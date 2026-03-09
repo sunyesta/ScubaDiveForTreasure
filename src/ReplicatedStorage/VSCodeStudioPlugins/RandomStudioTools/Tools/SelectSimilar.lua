@@ -67,7 +67,7 @@ function SelectSimilar.Create(): CanvasGroup
 	local nameBtn = CreateButton("NameBtn", "Select by Name", 4, body)
 	local beamBtn = CreateButton("BeamBtn", "Select Beams in Selection", 5, body)
 
-	-- Helper function to find the target value from the user's current selection
+	-- Helper function to find the target value from the user's current selection (Used for single-target buttons)
 	local function GetFirstValid(validationFunc: (Instance) -> any): any?
 		local selected = Selection:Get()
 		for _, inst in ipairs(selected) do
@@ -106,42 +106,52 @@ function SelectSimilar.Create(): CanvasGroup
 		print(string.format("[Random Studio Tools] Selected %d parts matching the Color.", #newSelection))
 	end)
 
-	-- 4. Logic for "Select by Mesh ID"
+	-- 4. Logic for "Select by Mesh ID" (UPDATED FOR MULTIPLE SELECTIONS)
 	meshBtn.Activated:Connect(function()
-		-- Look for a MeshPart, or a BasePart containing a SpecialMesh
-		local targetId = GetFirstValid(function(inst)
-			if inst:IsA("MeshPart") then
-				return inst.MeshId
-			end
-			if inst:IsA("BasePart") then
+		local currentSelection = Selection:Get()
+
+		-- We will store all the unique MeshIds we find in this dictionary
+		-- Dictionaries are extremely fast for looking up values later!
+		local targetIds: { [string]: boolean } = {}
+		local hasTarget = false
+
+		-- Gather all MeshIds from the currently selected objects
+		for _, inst in ipairs(currentSelection) do
+			if inst:IsA("MeshPart") and inst.MeshId ~= "" then
+				targetIds[inst.MeshId] = true
+				hasTarget = true
+			elseif inst:IsA("BasePart") then
 				local specialMesh = inst:FindFirstChildWhichIsA("SpecialMesh")
-				if specialMesh then
-					return specialMesh.MeshId
+				if specialMesh and specialMesh.MeshId ~= "" then
+					targetIds[specialMesh.MeshId] = true
+					hasTarget = true
 				end
 			end
-			return nil
-		end)
+		end
 
-		if not targetId or targetId == "" then
-			warn("[Random Studio Tools] Please select a MeshPart or a part containing a SpecialMesh first!")
+		if not hasTarget then
+			warn("[Random Studio Tools] Please select at least one MeshPart or a part containing a SpecialMesh first!")
 			return
 		end
 
 		local newSelection = {}
-		-- Scan Workspace for matching MeshIds
+
+		-- Scan Workspace and check if the found mesh's ID exists in our targetIds dictionary
 		for _, inst in ipairs(Workspace:GetDescendants()) do
-			if inst:IsA("MeshPart") and inst.MeshId == targetId then
-				table.insert(newSelection, inst)
+			if inst:IsA("MeshPart") then
+				if targetIds[inst.MeshId] then
+					table.insert(newSelection, inst)
+				end
 			elseif inst:IsA("BasePart") then
 				local specialMesh = inst:FindFirstChildWhichIsA("SpecialMesh")
-				if specialMesh and specialMesh.MeshId == targetId then
+				if specialMesh and targetIds[specialMesh.MeshId] then
 					table.insert(newSelection, inst)
 				end
 			end
 		end
 
 		Selection:Set(newSelection)
-		print(string.format("[Random Studio Tools] Selected %d parts matching the Mesh ID.", #newSelection))
+		print(string.format("[Random Studio Tools] Selected %d parts matching the selected Mesh IDs.", #newSelection))
 	end)
 
 	-- 5. Logic for "Select by Surface Appearance"
