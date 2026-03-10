@@ -1,15 +1,15 @@
-local MaxDepth = 30
+local ForestDepth = 30
 
 local Types = {
-
-	RandomEncounter = "RandomEncounter",
-	Ambush = "Ambush", -- Random amount of a single entity type
+	Ambush = "Ambush", -- Enemies
 	Effect = "Effect", -- Buff or debuff
 	Treasure = "Treasure", -- predefined treasure
-	RandomTreasure = "RandomTreasure", -- random treasure
-	TreasureGambit = "TreasureGambit",
-	RandomEffect = "RandomEffect",
-	Encounter = "Encounter",
+	Custom = "Custom", -- only define the layout
+}
+
+local BiomeDepthRanges = {
+	LightForest = NumberRange.new(1, 10),
+	InnerForest = NumberRange.new(11, ForestDepth),
 }
 
 local ScreenEffects = {
@@ -19,33 +19,37 @@ local ScreenEffects = {
 
 local Cards = {
 
-	EasyMonsters = {
-		ID = "EasyMonsters",
-		Weight = 1,
-		DepthRange = NumberRange.new(1, MaxDepth),
+	Slimes = {
+		ID = "Slimes",
+		Chance = 0.3,
+		DepthRange = BiomeDepthRanges.LightForest,
 		Action = {
 			Type = Types.Ambush,
-			MapVariant = nil, -- optional
-			EntityCount = 5,
-			PossibleEntities = {
-				{ Name = "Slime", DifficultyScale = 1, Weight = 0.1 },
-				{ Name = "Goblin", DifficultyScale = 1, Weight = 5 },
+			Entities = { -- Separated into rounds
+				{
+					{ Name = "Slime", DifficultyScale = 1 },
+					{ Name = "Slime", DifficultyScale = 1 },
+					{ Name = "Slime", DifficultyScale = 1 },
+				},
+				{
+					{ Name = "Slime", DifficultyScale = 1 },
+					{ Name = "Slime", DifficultyScale = 1 },
+					{ Name = "Slime", DifficultyScale = 1 },
+				},
 			},
 		},
 	},
 
-	Pain_001 = {
-		ID = "Pain_001",
+	EnergyConsumption = {
+		ID = "EnergyConsumption",
 		Name = "The Starving Lung",
-
-		Weight = 1,
-		DepthRange = NumberRange.new(1, MaxDepth),
+		Chance = 0.3,
+		DepthRange = BiomeDepthRanges.LightForest,
 		Action = {
 			Type = Types.Effect,
 			ScreenEffect = ScreenEffects.Negative,
 			Effect = {
 				Message = "Every breath feels like ash. You find it harder to travel.",
-				MapVariant = nil, -- optional
 				Attribute = "EnergyConsumption",
 				modifier = 2.0,
 				duration = -1, -- number of steps before the effect wears off. -1 = permanent
@@ -55,51 +59,30 @@ local Cards = {
 
 	SmallTreasure = {
 		ID = "SmallTreasure",
-		Weight = 1,
-		DepthRange = NumberRange.new(1, MaxDepth),
+		Chance = 0.3,
+		DepthRange = BiomeDepthRanges.LightForest,
 		Action = {
-			Type = Types.Treasure,
-			MapVariant = nil, -- optional
-			TreasureCount = 5,
-			PossibleTreasures = {
-				{ Name = "10Coins", Chance = 0.7 },
-				{ Name = "200Coins", Chance = 0.1 },
-				{ Name = "Necklace", Chance = 0.05 },
+			Type = Types.Treasures,
+			Treasures = {
+				"necklace",
+				"bracelet",
 			},
 		},
 	},
 
-	TreasureGambit1 = {
-		ID = "TreasureGambit1",
-		Name = "Treasure Gambit",
-		Weight = 1,
-		DepthRange = NumberRange.new(1, MaxDepth),
+	RockCliffs = {
+		ID = "RockCliffs",
+		Chance = 0.3,
+		DepthRange = BiomeDepthRanges.LightForest,
 		Action = {
-			Type = Types.Treasure,
-			MapVariant = nil, -- optional
-
-			Success = {
-				TreasureCount = 5,
-				PossibleTreasures = {
-					{ Name = "10Coins", Chance = 0.7 },
-					{ Name = "200Coins", Chance = 0.1 },
-					{ Name = "Necklace", Chance = 0.05 },
-				},
-			},
-
-			Failure = {
-				EntityCount = 5,
-				PossibleEntities = {
-					{ Name = "Slime", DifficultyScale = 1, Weight = 0.1 },
-					{ Name = "Goblin", DifficultyScale = 1, Weight = 5 },
-				},
-			},
+			Type = Types.Custom,
+			LayoutName = "RockCliffs",
 		},
 	},
 }
 
 local ForestLevels = {
-	MaxDepth = MaxDepth,
+	ForestDepth = ForestDepth,
 	Types = Types,
 	ScreenEffects = ScreenEffects,
 	Cards = Cards,

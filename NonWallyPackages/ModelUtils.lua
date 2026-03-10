@@ -67,4 +67,57 @@ function ModelUtils.GetPartsInModel(model, worldModel)
 	return insideParts
 end
 
+--[[
+    Title: Folder to Model Converter
+    Description: Converts a Folder instance into a Model, preserves children,
+                 and automatically assigns the largest BasePart as the PrimaryPart
+                 if one isn't explicitly provided.
+    Location: ReplicatedStorage (as a ModuleScript) or ServerScriptService (as a helper)
+--]]
+
+function ModelUtils.ConvertFolderToModel(folder: Folder, primaryPart: BasePart?): Model
+	-- 1. Create the new Model container
+	local newModel = Instance.new("Model")
+	newModel.Name = folder.Name
+	newModel.Parent = folder.Parent -- Keep it in the same hierarchy spot
+
+	-- 2. Move all children from Folder to Model
+	-- We use a variable for children to avoid issues with the live collection changing
+	local children = folder:GetChildren()
+	for _, child in children do
+		child.Parent = newModel
+	end
+
+	-- 3. Determine the PrimaryPart
+	if primaryPart and primaryPart:IsDescendantOf(newModel) then
+		-- Use the provided part if it exists and was moved into the model
+		newModel.PrimaryPart = primaryPart
+	else
+		-- Logic to find the "biggest" part by volume
+		local biggestPart: BasePart? = nil
+		local maxVolume = 0
+
+		for _, descendant in newModel:GetDescendants() do
+			if descendant:IsA("BasePart") then
+				-- Calculate Volume: Width * Height * Depth
+				local volume = descendant.Size.X * descendant.Size.Y * descendant.Size.Z
+
+				if volume > maxVolume then
+					maxVolume = volume
+					biggestPart = descendant
+				end
+			end
+		end
+
+		if biggestPart then
+			newModel.PrimaryPart = biggestPart
+		end
+	end
+
+	-- 4. Clean up the old folder
+	folder:Destroy()
+
+	return newModel
+end
+
 return ModelUtils

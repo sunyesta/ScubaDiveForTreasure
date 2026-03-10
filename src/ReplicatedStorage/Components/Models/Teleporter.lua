@@ -9,12 +9,28 @@ local Signal = require(ReplicatedStorage.Packages.Signal)
 
 local Player = Players.LocalPlayer
 
+-- Helper function to assert that the instance is governed by Persistent streaming
+local function assertPersistentStreaming(instance: Instance)
+	-- Find the first ancestor that is a Model, or use the instance itself if it is a Model
+	local model = if instance:IsA("Model") then instance else instance:FindFirstAncestorWhichIsA("Model")
+
+	-- Assert will throw an error in the console if the condition is false
+	assert(
+		model and model.ModelStreamingMode == Enum.ModelStreamingMode.Persistent,
+		string.format(
+			"[TeleporterServer] ERROR: '%s' must be placed inside a Model with ModelStreamingMode set to 'Persistent'!",
+			instance:GetFullName()
+		)
+	)
+end
+
 -- Hash table to store exit models
 local ExitModels = {}
 
 -- Helper function to add an exit model to our dictionary
 local function onExitModelAdded(model: Model)
 	local teleporterName = model:GetAttribute("TeleporterName")
+	assertPersistentStreaming(model)
 	if teleporterName then
 		ExitModels[teleporterName] = model
 	end
@@ -46,6 +62,8 @@ Teleporter.Used = Signal.new() -- (teleporterName)
 function Teleporter:Construct()
 	self._Trove = Trove.new()
 	self._isTeleporting = false -- Debounce to prevent multiple teleport fires
+
+	assertPersistentStreaming(self.Instance)
 end
 
 function Teleporter:Start()

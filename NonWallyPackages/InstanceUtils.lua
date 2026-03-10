@@ -1,3 +1,4 @@
+local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local DefaultValue = require(ReplicatedStorage.NonWallyPackages.DefaultValue)
@@ -124,13 +125,6 @@ function InstanceUtils.GetSelfAndDescendants(inst)
 	return TableUtil.Extend(inst:GetDescendants(), { inst })
 end
 
-local counter = 0
-function InstanceUtils.GenerateUniqueInGameID()
-	local name = "simpleID" .. counter
-	counter += 1
-	return name
-end
-
 function InstanceUtils.RemoveParent(inst)
 	inst.Parent = nil
 	return inst
@@ -159,6 +153,24 @@ function InstanceUtils.GetTaggedDescendants(inst, tag)
 	end
 
 	return insts
+end
+
+--[[
+    Finds the first child of an instance that has a specific CollectionService tag.
+    @param parent The instance to search through.
+    @param tag The tag string to look for.
+    @return The first child found with the tag, or nil if none exist.
+--]]
+function InstanceUtils.FindFirstChildTagged(parent: Instance, tag: string, recursive: boolean?): Instance?
+	local searchPool = if recursive then parent:GetDescendants() else parent:GetChildren()
+
+	for _, item in searchPool do
+		if CollectionService:HasTag(item, tag) then
+			return item
+		end
+	end
+
+	return nil
 end
 
 return InstanceUtils
