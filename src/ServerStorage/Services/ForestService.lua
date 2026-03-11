@@ -1,9 +1,12 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
-local ClientComm = require(ReplicatedStorage.Packages.Comm).ClientComm
-local GetAssetByName = require(ReplicatedStorage.Common.Modules.GetAssetByName)
-local ForestMapUtils = require(ServerStorage.Source.SecretModules.ForestMapUtils)
-local PlayerComm = ClientComm.new(ReplicatedStorage.Comm, true, "PlayerComm"):BuildObject()
+local BuildForestLevel = require(ServerStorage.Source.SecretModules.BuildForestLevel)
+local ForestLevelDefinitions = require(ReplicatedStorage.Common.GameInfo.Forest.ForestLevelDefinitions)
+local TableUtil = require(ReplicatedStorage.Packages.TableUtil)
+local PlayerContext = require(ServerStorage.Source.Services.PlayerContext)
+local PlayerComm = PlayerContext.Client.Comm
+
+local ForestLevelDefNames = TableUtil.Keys(ForestLevelDefinitions.LevelDefinitions)
 
 local ForestService = {}
 
@@ -11,11 +14,8 @@ function ForestService.GameStart()
 	ForestService._DrawForest()
 end
 
-function ForestService._DrawForest()
+function ForestService._DrawForest(seed)
 	-- draws the forest
-	-- use ForestMapUtils.GetMapPathData() to get the out and in ids and connect those ids with other path ids from other maps
-
-	-- GetAssetByName()
 end
 
 function ForestService._LoadLevel() end
@@ -24,11 +24,9 @@ function ForestService._RequireLevel()
 	-- loads a level if it hasn't been loaded yet and then returns
 end
 
-function ForestService._Enter() end
+function ForestService.TeleportPlayerToNextLevel(player) end
 
-PlayerComm:BindFunction("UseForestPath", function(player, pathID)
-	-- loads the forest level connected to the pathID and then teleports that player in front of the path
-end)
+function ForestService.LeaveForest() end
 
 PlayerComm:BindFunction("EnterForest", function(player)
 	-- loads the forest level connected to the pathID and then teleports that player in front of the path

@@ -6,6 +6,7 @@ local InstanceUtils = require(ReplicatedStorage.NonWallyPackages.InstanceUtils)
 local TableUtil = require(ReplicatedStorage.Packages.TableUtil)
 local ModelUtils = require(ReplicatedStorage.NonWallyPackages.ModelUtils)
 local Trove = require(ReplicatedStorage.Packages.Trove)
+local ForestLevelDefinitions = require(ReplicatedStorage.Common.GameInfo.Forest.ForestLevelDefinitions)
 
 function getLayoutPathData(layoutFolder, levelSeed)
 	local OutPaths = TableUtil.Filter(layoutFolder:GetDescendants(), function(inst)
@@ -39,66 +40,49 @@ function setupPaths(layoutModel, layoutPathData)
 	end
 end
 
-function buildBaseLayout(layoutFolder, layoutPathData, position)
+function buildBaseLayout(layoutFolder, layoutPathData, position, levelDefName, levelSeed)
 	local layoutModel = ModelUtils.ConvertFolderToModel(layoutFolder:Clone())
 	layoutModel:PivotTo(CFrame.new(position))
 	setupPaths(layoutModel, layoutPathData)
+	layoutModel.Position = true
 
-	layoutModel:SetAttribute("ExitsUnlocked", true)
+	layoutModel:AddTag("ForestLevel")
+	layoutModel:SetAttribute("levelDefName", levelDefName)
+	layoutModel:SetAttribute("LevelSeed", levelSeed)
+
+	layoutModel.Parent = workspace
 
 	return layoutModel
 end
 
-function spawnEntityOnGround(layoutModel, modelTemplate)
+function spawnEntityOnGround(layoutModel, modelTemplate, seed)
+	local model = modelTemplate:Clone()
+	model:SetAttribute("Seed", seed)
 	local ground = InstanceUtils.GetTaggedDescendants(layoutModel, "Ground")
 
 	local spawnPosition = nil --TODO set spawn position so that it only collides with ground. use getpartsinpart() to check
 	modelTemplate:PivotTo(spawnPosition)
 end
 
-local LayoutDefinitions = {}
+local BuildForestLayout = {}
 
-function LayoutDefinitions.Treasure(actionData, levelSeed)
+local buildFuncs = {}
+
+function buildFuncs.Treasure(levelSeed)
+	local levelDefName = "Treasure"
+	local levelDef = ForestLevelDefinitions.LevelDefinitions[levelDefName]
 	local layoutFolder = GetAssetByName("LightForest01")
 	local layoutPathData = getLayoutPathData(layoutFolder)
-	return {
-		LayoutPathData = layoutPathData,
-		Build = function(position)
-			local trove = Trove.new()
-			local layoutModel = trove:Add(buildBaseLayout(layoutFolder, layoutPathData, position))
+	return function(position)
+		local trove = Trove.new()
+		local layoutModel = trove:Add(buildBaseLayout(layoutFolder, layoutPathData, position, levelDefName, levelSeed))
 
-			trove:Add(spawnEntityOnGround(layoutModel, GetAssetByName("ForestChest")))
+		trove:Add(spawnEntityOnGround(layoutModel, GetAssetByName("ForestChest")), levelSeed)
 
-			return trove
-		end,
-	}
+		return trove
+	end
 end
 
-function LayoutDefinitions.Ambush(actionData, levelSeed)
-	local layoutFolder = GetAssetByName("LightForest01")
-	local layoutPathData = getLayoutPathData(layoutFolder)
-	return {
-
-		LayoutPathData = layoutPathData,
-		Build = function(position, playerWhoEnteredFirst)
-			local trove = Trove.new()
-			local layoutModel = trove:Add(buildBaseLayout(layoutFolder, layoutPathData, position))
-
-			local completedLevels = playerWhoEnteredFirst:GetAttribute("CompletedLevels")
-			if not completedLevels[level] then
-				layoutModel:SetAttribute("ExitsUnlocked", false)
-				for _, entity in actionData.Entities do
-					trove:Add(spawnEntityOnGround(layoutModel, GetAssetByName(entity)))
-				end
-				-- todo wait for all the spawned entities to die before spawning the next wave
-			end
-
-			-- todo wait for all entities to be dead before unlocking the exits
-			layoutModel:SetAttribute("ExitsUnlocked", true)
-
-			return trove
-		end,
-	}
+return function(levelDefName, levelSeed)
+	return buildFuncs[levelDefName](levelSeed)
 end
-
-return LayoutDefinitions

@@ -17,7 +17,7 @@ local ScreenEffects = {
 	Positive = "Positive",
 }
 
-local Cards = {
+local LevelDefinitions = {
 
 	Slimes = {
 		ID = "Slimes",
@@ -85,7 +85,7 @@ local ForestLevels = {
 	ForestDepth = ForestDepth,
 	Types = Types,
 	ScreenEffects = ScreenEffects,
-	Cards = Cards,
+	LevelDefinitions = LevelDefinitions,
 }
 
 return ForestLevels

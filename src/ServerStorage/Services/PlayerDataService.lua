@@ -70,12 +70,6 @@ end
 function PlayerDataService._BindPlayerContextToProfile(player: Player, profile: any)
 	local trove = Trove.new()
 
-	-- Bind Wins
-	PlayerContext.Client.Wins:SetFor(player, profile.Data.Wins)
-	trove:Add(PlayerContext.Client.Wins:ObserveFor(player, function(wins)
-		profile.Data.Wins = wins
-	end))
-
 	-- 2 & 3. Bind Inventory (Load initial data, then observe for changes)
 	PlayerContext.Client.Inventory:SetFor(player, profile.Data.Inventory)
 	trove:Add(PlayerContext.Client.Inventory:ObserveFor(player, function(inventory)

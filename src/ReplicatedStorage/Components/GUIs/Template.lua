@@ -3,8 +3,8 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 --packages
 local Component = require(ReplicatedStorage.Packages.Component)
-local ComponentRegistry = require(ReplicatedStorage.NonWallyPackages.ComponentRegistry)
 local Trove = require(ReplicatedStorage.Packages.Trove)
+local Property = require(ReplicatedStorage.NonWallyPackages.Property)
 
 --Instances
 local Player = Players.LocalPlayer
@@ -13,6 +13,7 @@ local Template = Component.new({
 	Tag = "Template",
 	Ancestors = { Player },
 })
+Template.IsOpen = Property.new(false)
 -- Template.Singleton = true
 
 function Template:Construct()
@@ -27,7 +28,15 @@ function Template:Stop()
 end
 
 function Template.Open()
+	if Template.IsOpen:Get() then
+		return
+	end
 	local self = Template:GetAll()[1]
+
+	Template.IsOpen:Set(true)
+	self._OpenTrove:Add(function()
+		Template.IsOpen:Set(false)
+	end)
 end
 
 function Template.Close()

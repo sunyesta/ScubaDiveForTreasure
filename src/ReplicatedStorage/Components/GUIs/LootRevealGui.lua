@@ -6,7 +6,7 @@ local TweenService = game:GetService("TweenService")
 --packages
 local Component = require(ReplicatedStorage.Packages.Component)
 local Trove = require(ReplicatedStorage.Packages.Trove)
-local LootTable = require(ReplicatedStorage.Common.GameInfo.LootTable)
+-- local LootTable = require(ReplicatedStorage.Common.GameInfo.LootTable)
 local SoundUtils = require(ReplicatedStorage.NonWallyPackages.SoundUtils)
 
 --Constants
