@@ -1,0 +1,3 @@
+local RotateTool = {}
+
+return RotateTool

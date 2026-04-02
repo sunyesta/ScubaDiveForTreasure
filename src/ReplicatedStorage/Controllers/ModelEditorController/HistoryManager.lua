@@ -1,0 +1,3 @@
+local HistoryManager = {}
+
+return HistoryManager

@@ -139,16 +139,7 @@ if __name__ == "__main__":
 
     # 1. Define your list of files AND/OR directories here
     src_paths = [
-        # Example of a directory
-        # r"src/MyFolder",
-        # Example of specific files
-        # r"src/ReplicatedStorage/Components/Models/Treasure.lua",
-        # r"src/ServerStorage/Components/Models/Treasure.lua",
-        # r"src/ReplicatedStorage/Modules/ComponentUtils/TreasureUtils.lua",
-        # r"src/ReplicatedStorage/VSCodeStudioPlugins/SmoothieMoveTools",
-        # r"C:\Users\Mary\Documents\roblox game dev\ScubaDiveForTreasure\NonWallyPackages\Cinemachine",
-        # r"src\ReplicatedStorage\VSCodeStudioPlugins\SmoothieMoveTools2",
-        r"src\ReplicatedStorage\VSCodeStudioPlugins\RandomStudioTools"
+        r"C:\Users\Mary\Documents\roblox game dev\CakeGame\src\ReplicatedStorage\Controllers\ModelEditorController"
     ]
 
     # 2. Define your output file
@@ -159,6 +150,7 @@ if __name__ == "__main__":
     black_list = [
         # r"src\ReplicatedStorage\VSCodeStudioPlugins\SmoothieMoveTools2\Trove.lua"
         r"src\ReplicatedStorage\VSCodeStudioPlugins\RandomStudioTools\Modules"
+        # r"NonWallyPackages\BridgeNet2"
     ]
 
     # Ensure output directory exists before running

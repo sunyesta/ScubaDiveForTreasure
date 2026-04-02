@@ -120,7 +120,7 @@ function Property.BindToAttribute(instance, attributeName, defaultValue)
 end
 
 -- Returns a NormalProp bound to a specific property of an Instance
-function Property.BindToInstanceProperty(instance, instancePropertyName, defaultValue)
+function Property.BindToProperty(instance, instancePropertyName, defaultValue)
 	local isReadOnly = (defaultValue == Property.READ_ONLY)
 
 	local initialValue
@@ -221,6 +221,10 @@ end
 -- ============================================================================
 
 function NormalProp:Get()
+	-- Modified to return a shallow copy if the value is a table
+	if type(self._value) == "table" then
+		return table.clone(self._value)
+	end
 	return self._value
 end
 
@@ -252,7 +256,7 @@ function NormalProp:Update(callback)
 end
 
 function NormalProp:Observe(callback)
-	task.spawn(callback, self._value)
+	task.spawn(callback, self:Get()) -- Using :Get() here ensures the callback also receives a safe shallow copy
 	return self.Changed:Connect(callback)
 end
 
@@ -286,6 +290,7 @@ end
 -- ============================================================================
 
 function CommProp:Get()
+	-- This relies on NormalProp:Get(), so it will inherently return shallow copies of tables!
 	return self._prop:Get()
 end
 
@@ -311,10 +316,21 @@ end
 -- ============================================================================
 
 function PlayerCommProp:GetFor(player)
-	return self._commProp:GetFor(player)
+	local value = self._commProp:GetFor(player)
+
+	-- Modified to return a shallow copy if the value is a table
+	if type(value) == "table" then
+		return table.clone(value)
+	end
+
+	return value
 end
 
 function PlayerCommProp:SetFor(player, value)
+	if type(value) == "table" then
+		value = table.clone(value)
+	end
+
 	self._commProp:SetFor(player, value)
 
 	-- Fire generic signal
@@ -381,6 +397,7 @@ Property.Utils = Utils
 
 function Utils.Equals(property, value)
 	if type(property) == "table" and property.Get then
+		-- This now safely compares against a shallow copy if it's a table
 		return property:Get() == value
 	end
 	return false

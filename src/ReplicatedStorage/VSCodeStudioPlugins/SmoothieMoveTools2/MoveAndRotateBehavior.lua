@@ -52,16 +52,16 @@ local function SnapToGridByEdge(targetPos: number, extentsMin: number, extentsMa
 end
 
 -- Calculates the world-space offsets from the origin position to the edges of the bounding box.
-local function CalculateWorldExtents(parts: { Instance }, originPos: Vector3): (Vector3, Vector3)
+local function CalculateWorldExtents(objects: { Instance }, originPos: Vector3): (Vector3, Vector3)
 	local minX, minY, minZ = math.huge, math.huge, math.huge
 	local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
-	local hasParts = false
+	local hasObjects = false
 
-	for _, part in ipairs(parts) do
-		if part:IsA("BasePart") then
-			hasParts = true
-			local size = part.Size
-			local cf = part.CFrame
+	for _, obj in ipairs(objects) do
+		if obj:IsA("BasePart") then
+			hasObjects = true
+			local size = obj.Size
+			local cf = obj.CFrame
 			local hX, hY, hZ = size.X / 2, size.Y / 2, size.Z / 2
 
 			-- Calculate all 8 corners of the rotated part in world space
@@ -85,10 +85,21 @@ local function CalculateWorldExtents(parts: { Instance }, originPos: Vector3): (
 				maxY = math.max(maxY, corner.Y)
 				maxZ = math.max(maxZ, corner.Z)
 			end
+		elseif obj:IsA("Attachment") then
+			hasObjects = true
+			local pos = obj.WorldPosition
+
+			-- Attachments are points, so we just include their position
+			minX = math.min(minX, pos.X)
+			minY = math.min(minY, pos.Y)
+			minZ = math.min(minZ, pos.Z)
+			maxX = math.max(maxX, pos.X)
+			maxY = math.max(maxY, pos.Y)
+			maxZ = math.max(maxZ, pos.Z)
 		end
 	end
 
-	if not hasParts then
+	if not hasObjects then
 		return Vector3.zero, Vector3.zero
 	end
 
@@ -183,14 +194,14 @@ local function TranslateDragStyle(
 	initialMouseRay: Ray?,
 	saveState: SaveStateFunc?
 )
-	local selectedParts = Props.SelectedParts:Get()
+	local selectedObjects = Props.SelectedMovableObjects:Get()
 
 	-- Pre-calculate bounding box extents for edge-based snapping
-	local minExtents, maxExtents = CalculateWorldExtents(selectedParts, initialOrigin.Position)
+	local minExtents, maxExtents = CalculateWorldExtents(selectedObjects, initialOrigin.Position)
 
 	local snapRaycastParams = RaycastParams.new()
 	snapRaycastParams.FilterType = Enum.RaycastFilterType.Exclude
-	snapRaycastParams.FilterDescendantsInstances = selectedParts
+	snapRaycastParams.FilterDescendantsInstances = selectedObjects
 	snapRaycastParams.RespectCanCollide = false
 
 	local function calculateHit(ray: Ray)
@@ -573,9 +584,9 @@ function MoveAndRotateBehavior.Init(plugin: Plugin, pluginTrove: any)
 	type DragSession = {
 		Type: string,
 		InitialOrigin: CFrame,
-		OriginalCFrames: { [BasePart]: CFrame },
-		OriginalPivotOffsets: { [BasePart]: CFrame },
-		PartOffsets: { [BasePart]: CFrame },
+		OriginalCFrames: { [Instance]: CFrame },
+		OriginalPivotOffsets: { [Instance]: CFrame },
+		ObjectOffsets: { [Instance]: CFrame },
 		PreviousRibbonTool: Enum.RibbonTool?,
 		InitialSelection: { Instance },
 		InitialMouseRay: Ray?,
@@ -598,12 +609,17 @@ function MoveAndRotateBehavior.Init(plugin: Plugin, pluginTrove: any)
 			currentSession.Cleanup()
 
 			if not commit then
-				for part, cframe in pairs(currentSession.OriginalCFrames) do
-					-- Safely restore the original pivot offset and part CFrame
-					if currentSession.OriginalPivotOffsets[part] then
-						part.PivotOffset = currentSession.OriginalPivotOffsets[part]
+				for obj, cframe in pairs(currentSession.OriginalCFrames) do
+					if obj:IsA("BasePart") then
+						-- Safely restore the original pivot offset and part CFrame
+						if currentSession.OriginalPivotOffsets[obj] then
+							obj.PivotOffset = currentSession.OriginalPivotOffsets[obj]
+						end
+						obj:PivotTo(cframe)
+					elseif obj:IsA("Attachment") then
+						-- Restore attachment's original world CFrame
+						obj.WorldCFrame = cframe
 					end
-					part:PivotTo(cframe)
 				end
 			else
 				ChangeHistoryService:SetWaypoint(currentSession.Type .. " Transformed")
@@ -682,19 +698,25 @@ function MoveAndRotateBehavior.Init(plugin: Plugin, pluginTrove: any)
 				-- Step the drag forcefully so the part visualizes on the new axis immediately
 				local mousePos = PluginMouse:GetPosition()
 				local newTransformOrigin = currentSession.Drag:Step(mousePos)
+
 				if newTransformOrigin then
 					local originsOnly = Props.OriginsOnly:Get()
 
-					for part, offset in pairs(currentSession.PartOffsets) do
+					for obj, offset in pairs(currentSession.ObjectOffsets) do
 						local targetPivot = newTransformOrigin:ToWorldSpace(offset)
 
-						if originsOnly then
-							-- Only modify PivotOffset, leave geometry unchanged
-							part.PivotOffset = part.CFrame:ToObjectSpace(targetPivot)
-						else
-							-- Move whole part (restore original PivotOffset to avoid mid-toggle jumps)
-							part.PivotOffset = currentSession.OriginalPivotOffsets[part]
-							part:PivotTo(targetPivot)
+						if obj:IsA("BasePart") then
+							if originsOnly then
+								-- Only modify PivotOffset, leave geometry unchanged
+								obj.PivotOffset = obj.CFrame:ToObjectSpace(targetPivot)
+							else
+								-- Move whole part (restore original PivotOffset to avoid mid-toggle jumps)
+								obj.PivotOffset = currentSession.OriginalPivotOffsets[obj]
+								obj:PivotTo(targetPivot)
+							end
+						elseif obj:IsA("Attachment") then
+							-- Attachments do not possess their own pivot offsets, simply move them
+							obj.WorldCFrame = targetPivot
 						end
 					end
 					Props.TransformOrigin:Set(newTransformOrigin)
@@ -710,12 +732,13 @@ function MoveAndRotateBehavior.Init(plugin: Plugin, pluginTrove: any)
 
 		plugin:Activate(true)
 
-		local selectedParts = Props.SelectedParts:Get()
-		if #selectedParts == 0 then
+		-- Change to use SelectedMovableObjects to target both Parts and Attachments
+		local selectedObjects = Props.SelectedMovableObjects:Get()
+		if #selectedObjects == 0 then
 			return
 		end
 
-		local activePart = Props.ActivePart:Get() or selectedParts[1]
+		local activeObject = Props.ActivePart:Get() or selectedObjects[1]
 		local initialOrigin = SelectionBehavior.CalculateTransformOrigin()
 
 		Props.TransformOrigin:Set(initialOrigin)
@@ -725,14 +748,18 @@ function MoveAndRotateBehavior.Init(plugin: Plugin, pluginTrove: any)
 
 		local originalCFrames = {}
 		local originalPivotOffsets = {}
-		local partOffsets = {}
+		local objectOffsets = {}
 
-		for _, part in ipairs(selectedParts) do
-			if part:IsA("BasePart") then
-				local pivot = part:GetPivot()
-				originalCFrames[part] = pivot
-				originalPivotOffsets[part] = part.PivotOffset
-				partOffsets[part] = initialOrigin:ToObjectSpace(pivot)
+		for _, obj in ipairs(selectedObjects) do
+			if obj:IsA("BasePart") then
+				local pivot = obj:GetPivot()
+				originalCFrames[obj] = pivot
+				originalPivotOffsets[obj] = obj.PivotOffset
+				objectOffsets[obj] = initialOrigin:ToObjectSpace(pivot)
+			elseif obj:IsA("Attachment") then
+				local pivot = obj.WorldCFrame
+				originalCFrames[obj] = pivot
+				objectOffsets[obj] = initialOrigin:ToObjectSpace(pivot)
 			end
 		end
 
@@ -762,7 +789,14 @@ function MoveAndRotateBehavior.Init(plugin: Plugin, pluginTrove: any)
 			return
 		end
 
-		local drag = GeometricDrag.new(activePart)
+		-- GeometricDrag likely calls :GetPivot() internally. If our activeObject is an
+		-- Attachment, we pass its Parent (BasePart) instead to prevent the error.
+		local dragTarget = activeObject
+		if dragTarget and dragTarget:IsA("Attachment") then
+			dragTarget = dragTarget.Parent or Workspace.Terrain
+		end
+
+		local drag = GeometricDrag.new(dragTarget)
 
 		if typeof(PluginMouse.Enable) == "function" then
 			PluginMouse:Enable()
@@ -774,7 +808,7 @@ function MoveAndRotateBehavior.Init(plugin: Plugin, pluginTrove: any)
 			InitialOrigin = initialOrigin,
 			OriginalCFrames = originalCFrames,
 			OriginalPivotOffsets = originalPivotOffsets,
-			PartOffsets = partOffsets,
+			ObjectOffsets = objectOffsets,
 			PreviousRibbonTool = previousTool,
 			InitialSelection = currentSelection,
 			InitialMouseRay = nil,
@@ -804,17 +838,21 @@ function MoveAndRotateBehavior.Init(plugin: Plugin, pluginTrove: any)
 			if newTransformOrigin then
 				local originsOnly = Props.OriginsOnly:Get()
 
-				for part, offset in pairs(partOffsets) do
+				for obj, offset in pairs(objectOffsets) do
 					local targetPivot = newTransformOrigin:ToWorldSpace(offset)
 
-					if originsOnly then
-						-- Math explanation: part.CFrame * part.PivotOffset = targetPivot
-						-- Therefore: part.PivotOffset = part.CFrame:Inverse() * targetPivot
-						part.PivotOffset = part.CFrame:ToObjectSpace(targetPivot)
-					else
-						-- Reset pivot to original just in case they toggled OriginsOnly mid-drag
-						part.PivotOffset = originalPivotOffsets[part]
-						part:PivotTo(targetPivot)
+					if obj:IsA("BasePart") then
+						if originsOnly then
+							-- Math explanation: part.CFrame * part.PivotOffset = targetPivot
+							-- Therefore: part.PivotOffset = part.CFrame:Inverse() * targetPivot
+							obj.PivotOffset = obj.CFrame:ToObjectSpace(targetPivot)
+						else
+							-- Reset pivot to original just in case they toggled OriginsOnly mid-drag
+							obj.PivotOffset = originalPivotOffsets[obj]
+							obj:PivotTo(targetPivot)
+						end
+					elseif obj:IsA("Attachment") then
+						obj.WorldCFrame = targetPivot
 					end
 				end
 
@@ -837,9 +875,9 @@ function MoveAndRotateBehavior.Init(plugin: Plugin, pluginTrove: any)
 			end
 		end
 
-		local activePart = Props.ActivePart:Get()
+		local activeObject = Props.ActivePart:Get()
 
-		if activePart and not currentSession then
+		if activeObject and not currentSession then
 			if key == Enum.KeyCode.G then
 				local cam = Workspace.CurrentCamera.CFrame
 				StartSession(Enums.TransformType.Move, cam.RightVector, cam.UpVector)

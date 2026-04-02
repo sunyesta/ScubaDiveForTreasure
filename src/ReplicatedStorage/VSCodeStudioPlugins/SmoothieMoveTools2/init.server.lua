@@ -12,7 +12,7 @@ local toolbar = plugin:CreateToolbar("Smoothie Move Tools")
 local toggleButton = toolbar:CreateButton(
 	"Toggle Smoothie Move Tolls",
 	"Toggle Smoothie Move Tools",
-	"rbxassetid://1507949215" -- Replace with your own icon asset ID
+	"http://www.roblox.com/asset/?id=87600813209901" -- Replace with your own icon asset ID
 )
 toggleButton.ClickableWhenViewportHidden = true
 

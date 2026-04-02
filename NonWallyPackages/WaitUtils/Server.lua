@@ -77,23 +77,32 @@ function WaitUtils.InstanceListLoaded(player, instances)
 	end)
 end
 
-function WaitUtils.BindToWait(secs, callback)
-	local stop = false
+function WaitUtils.Loop(secs: number, callback: (stop: () -> ()) -> ()): () -> ()
+	local isStopped = false
 
-	local stopFunc = function()
-		stop = true
+	-- Define the function that stops the loop
+	local function stopFunc()
+		isStopped = true
 	end
 
+	-- Use task.spawn to run the loop in a separate thread without yielding the main script
 	task.spawn(function()
-		while task.wait(secs) do
-			if stop then
+		while not isStopped do
+			-- Execute the callback and pass the stop function to it
+			callback(stopFunc)
+
+			-- Wait the specified duration
+			task.wait(secs)
+
+			-- If the callback called stopFunc(), we should exit immediately
+			-- instead of running the callback one more time.
+			if isStopped then
 				break
 			end
-			callback(stopFunc)
 		end
 	end)
 
+	-- Return the stop function so the script that started the loop can stop it externally
 	return stopFunc
 end
-
 return WaitUtils

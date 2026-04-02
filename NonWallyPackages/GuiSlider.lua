@@ -5,11 +5,13 @@ local Property = require(ReplicatedStorage.NonWallyPackages.Property)
 local Trove = require(ReplicatedStorage.Packages.Trove)
 local DefaultValue = require(ReplicatedStorage.NonWallyPackages.DefaultValue)
 local Signal = require(ReplicatedStorage.Packages.Signal)
-local UserInputUtils = require(ReplicatedStorage.NonWallyPackages.UserInputUtils)
+local MouseTouch = require(ReplicatedStorage.NonWallyPackages.MouseTouch)
 local Player = Players.LocalPlayer
 local Mouse = Player:GetMouse()
 
-local MouseTouch = UserInputUtils.MouseTouch.new(true)
+local mouseTouch = MouseTouch.new({
+	Gui = true,
+})
 
 function lerp(start, goal, alpha)
 	return start + (goal - start) * alpha
@@ -106,9 +108,9 @@ function GuiSlider.new(params)
 		end)
 
 		valueToMouse()
-		mouseDownTrove:Add(MouseTouch.Moved:Connect(valueToMouse))
+		mouseDownTrove:Add(mouseTouch.Moved:Connect(valueToMouse))
 
-		mouseDownTrove:Add(MouseTouch.LeftUp:Connect(function()
+		mouseDownTrove:Add(mouseTouch.LeftUp:Connect(function()
 			mouseDownTrove:Clean()
 		end))
 	end

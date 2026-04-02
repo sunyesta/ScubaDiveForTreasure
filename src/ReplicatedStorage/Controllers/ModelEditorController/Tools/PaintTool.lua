@@ -1,0 +1,3 @@
+local PaintTool = {}
+
+return PaintTool

@@ -11,7 +11,7 @@ local Playlists = require(ReplicatedStorage.Common.Modules.Playlists)
 local SoundController = {}
 
 -- Public volume properties (0-1)
-SoundController.SoundVolume = Property.new(0.8)
+SoundController.SoundVolume = Property.new(1)
 SoundController.MusicVolume = Property.new(0)
 
 -- Uncommented this so the property actually controls the music volume

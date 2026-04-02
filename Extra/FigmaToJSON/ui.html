@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Figma to JSON</title>
+		<style>
+			:root {
+				--bg: #f5f5f5;
+				--text: #333333;
+				--border: #e5e5e5;
+				--brand: #18a0fb;
+				--brand-hover: #0d8deb;
+			}
+
+			body {
+				font-family: Inter, sans-serif;
+				padding: 16px;
+				margin: 0;
+				display: flex;
+				flex-direction: column;
+				height: 100vh;
+				box-sizing: border-box;
+				background-color: var(--bg);
+				color: var(--text);
+			}
+
+			h3 {
+				margin-top: 0;
+				margin-bottom: 12px;
+				font-size: 14px;
+				font-weight: 600;
+			}
+
+			textarea {
+				flex-grow: 1;
+				width: 100%;
+				resize: none;
+				font-family:
+					"SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+				font-size: 12px;
+				padding: 12px;
+				box-sizing: border-box;
+				border: 1px solid var(--border);
+				border-radius: 6px;
+				margin-bottom: 16px;
+				background-color: white;
+				color: #333;
+			}
+
+			textarea:focus {
+				outline: none;
+				border-color: var(--brand);
+			}
+
+			button {
+				background-color: var(--brand);
+				color: white;
+				border: none;
+				border-radius: 6px;
+				padding: 12px;
+				font-size: 13px;
+				font-weight: 600;
+				cursor: pointer;
+				transition: background-color 0.2s;
+			}
+
+			button:hover {
+				background-color: var(--brand-hover);
+			}
+
+			#message {
+				margin-top: 8px;
+				font-size: 12px;
+				text-align: center;
+				color: #1ca672; /* Success green */
+				min-height: 15px;
+			}
+		</style>
+	</head>
+	<body>
+		<h3>Exported Styling Data</h3>
+		<textarea
+			id="json-output"
+			readonly
+			placeholder="Loading JSON data..."
+		></textarea>
+		<button id="copy-btn">Copy to Clipboard</button>
+		<div id="message"></div>
+
+		<script>
+			const textarea = document.getElementById("json-output");
+			const messageDiv = document.getElementById("message");
+			const copyBtn = document.getElementById("copy-btn");
+
+			// Listen for messages from the main plugin code
+			window.onmessage = (event) => {
+				const pluginMessage = event.data.pluginMessage;
+
+				if (pluginMessage.type === "export-json") {
+					textarea.value = pluginMessage.data;
+				} else if (pluginMessage.type === "error") {
+					textarea.value = pluginMessage.message;
+					textarea.style.color = "#F24822"; // Figma red for errors
+				}
+			};
+
+			// Copy to clipboard functionality
+			copyBtn.onclick = () => {
+				if (!textarea.value || textarea.value.startsWith("Please select"))
+					return;
+
+				textarea.select();
+				document.execCommand("copy");
+
+				messageDiv.textContent = "JSON copied to clipboard!";
+				setTimeout(() => {
+					messageDiv.textContent = "";
+				}, 2500);
+			};
+		</script>
+	</body>
+</html>

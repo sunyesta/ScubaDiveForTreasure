@@ -15,6 +15,7 @@ return {
 	RotationGridDeg = Property.new(0),
 	ActiveColor = Property.new(Color3.new()),
 	SelectedObjects = Property.new({}),
+	SelectedMovableObjects = Property.new({}),
 	SelectedParts = Property.new({}),
 	ActivePart = Property.new(nil),
 	TransformOrigin = Property.new(CFrame.new()),

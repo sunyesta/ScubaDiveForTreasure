@@ -71,12 +71,12 @@ function PlayerDataService._BindPlayerContextToProfile(player: Player, profile: 
 	local trove = Trove.new()
 
 	-- 2 & 3. Bind Inventory (Load initial data, then observe for changes)
-	PlayerContext.Client.Inventory:SetFor(player, profile.Data.Inventory)
-	trove:Add(PlayerContext.Client.Inventory:ObserveFor(player, function(inventory)
-		-- Whenever InventoryService calls :SetFor(), this observer fires
-		-- and updates the Profile data ready for the next auto-save.
-		profile.Data.Inventory = inventory
-	end))
+	-- PlayerContext.Client.Inventory:SetFor(player, profile.Data.Inventory)
+	-- trove:Add(PlayerContext.Client.Inventory:ObserveFor(player, function(inventory)
+	-- 	-- Whenever InventoryService calls :SetFor(), this observer fires
+	-- 	-- and updates the Profile data ready for the next auto-save.
+	-- 	profile.Data.Inventory = inventory
+	-- end))
 
 	return trove
 end

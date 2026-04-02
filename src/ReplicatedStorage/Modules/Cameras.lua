@@ -24,10 +24,20 @@ function PlayerCamera()
 
 	Cinemachine.Brain:Register(playerCamera)
 
-	PlayerUtils.ObserveCharacterAdded(Player, function(character)
-		character:WaitForChild("Humanoid")
-		playerCamera.Follow = character.Humanoid
-		playerCamera.LookAt = character.Humanoid
+	playerCamera:Observe(function(activeTrove)
+		activeTrove:Add(PlayerUtils.ObserveCharacterAdded(Player, function(character)
+			-- Track HumanoidRootPart for 2D to avoid jitter from animation (Head bobbing)
+			local rootPart = character:WaitForChild("HumanoidRootPart")
+
+			character:WaitForChild("Humanoid")
+			playerCamera.Follow = character.Humanoid
+			playerCamera.LookAt = character.Humanoid
+
+			SoundService:SetListener(Enum.ListenerType.ObjectPosition, rootPart)
+			activeTrove:Add(function()
+				SoundService:SetListener(Enum.ListenerType.Camera)
+			end)
+		end))
 	end)
 
 	playerCamera.Body.RotatePlayerWithShiftlock = true

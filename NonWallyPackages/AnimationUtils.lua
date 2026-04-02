@@ -100,7 +100,7 @@ function AnimationUtils.PlayAnimation(
 	weight: number?,
 	speed: number?
 )
-	local animationTrack = AnimationUtils.CreateAnimationTrack(animator, animationID, fadeTime, weight, speed)
+	local animationTrack = AnimationUtils.CreateAnimationTrackFromID(animator, animationID, fadeTime, weight, speed)
 	animationTrack:Play()
 	return animationTrack
 end
@@ -188,17 +188,59 @@ function AnimationUtils.AnimateHumanoid(character, animNames)
 	return trove
 end
 
-function AnimationUtils.CreateAnimationTrack(
-	animator: Animator,
-	animationID: string,
-	fadeTime: number?,
-	weight: number?,
-	speed: number?
-)
+function AnimationUtils.CreateAnimationTrackFromID(animator: Animator, animationID: string)
 	local animation = Instance.new("Animation")
 	animation.AnimationId = animationID
 	local animationTrack = animator:LoadAnimation(animation)
 	return animationTrack
+end
+
+function AnimationUtils.CreateAnimation(animationID, parent)
+	local animation = Instance.new("Animation")
+	animation.AnimationId = animationID
+	animation.Parent = nil
+
+	return animation
+end
+
+function AnimationUtils.PlayAndHold(animationTrack: AnimationTrack)
+	animationTrack:Play()
+
+	-- FIX: Added an `isCancelled` flag. If another script calls :Stop() on this track,
+	-- this flag flips to true, and our spawned task will safely abort!
+	local isCancelled = false
+
+	-- Clean up and reset speed when the animation is explicitly stopped
+	local stoppedConnection
+	stoppedConnection = animationTrack.Stopped:Connect(function()
+		isCancelled = true
+		animationTrack:AdjustSpeed(1)
+		if stoppedConnection then
+			stoppedConnection:Disconnect()
+			stoppedConnection = nil
+		end
+	end)
+
+	task.spawn(function()
+		-- Wait for the track to load its length
+		while animationTrack.Length == 0 do
+			-- Exit early if the animation was stopped before it even loaded
+			if isCancelled then
+				return
+			end
+			task.wait()
+		end
+
+		-- Yield until right before the animation naturally stops
+		local holdTime = math.max(0, animationTrack.Length - 0.05)
+		task.wait(holdTime)
+
+		-- Double check that the animation wasn't stopped during our task.wait()
+		if not isCancelled and animationTrack.IsPlaying then
+			animationTrack:AdjustSpeed(0) -- Freeze!
+			animationTrack.TimePosition = animationTrack.Length - 0.01 -- Set to last frame
+		end
+	end)
 end
 
 return AnimationUtils

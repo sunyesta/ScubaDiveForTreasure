@@ -49,7 +49,15 @@ end)
 StartLoadingScreen.UpdateStatus("Starting Game...")
 for _, file in ReplicatedStorage.Common.Controllers:GetChildren() do
 	if file:IsA("ModuleScript") then
-		print(file.Name)
+		local controller = require(file)
+		if controller.GameInit then
+			controller.GameInit()
+		end
+	end
+end
+
+for _, file in ReplicatedStorage.Common.Controllers:GetChildren() do
+	if file:IsA("ModuleScript") then
 		local controller = require(file)
 		if controller.GameStart then
 			controller.GameStart()

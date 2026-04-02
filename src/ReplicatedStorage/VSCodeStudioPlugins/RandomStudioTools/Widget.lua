@@ -8,10 +8,12 @@ local LayoutTools = require(script.Parent.Tools.LayoutTools)
 local CameraPositions = require(script.Parent.Tools.CameraPositions)
 local AssetOperations = require(script.Parent.Tools.AssetOperations)
 local ReplaceMesh = require(script.Parent.Tools.ReplaceMesh)
+local SpecialMeshConverter = require(script.Parent.Tools.SpecialMeshConverter)
 local AutoPrimaryPart = require(script.Parent.Tools.AutoPrimaryPart)
 local SelectSimilar = require(script.Parent.Tools.SelectSimilar)
 local AspectRatioResizer = require(script.Parent.Tools.AspectRatioResizer)
-local MoveTool = require(script.Parent.Tools.MoveTool) -- NEW REQUIRED MODULE
+local MoveTool = require(script.Parent.Tools.MoveTool)
+local WeldTool = require(script.Parent.Tools.WeldTool) -- NEW REQUIRED MODULE
 
 local THEME = Config.THEME
 local ICONS = Config.ICONS
@@ -159,21 +161,29 @@ function Widget.Init(plugin: Plugin, pluginTrove: any)
 	local replaceMeshSection = ReplaceMesh.Create()
 	replaceMeshSection.Parent = scrollFrame
 
-	-- [[ 4E. AUTO PRIMARY PART SECTION ]] --
+	-- [[ 4E. SPECIAL MESH CONVERTER SECTION ]] --
+	local specialMeshSection = SpecialMeshConverter.Create()
+	specialMeshSection.Parent = scrollFrame
+
+	-- [[ 4F. AUTO PRIMARY PART SECTION ]] --
 	local autoPrimarySection = AutoPrimaryPart.Create()
 	autoPrimarySection.Parent = scrollFrame
 
-	-- [[ 4F. SELECT SIMILAR SECTION ]] --
+	-- [[ 4G. SELECT SIMILAR SECTION ]] --
 	local selectSimilarSection = SelectSimilar.Create()
 	selectSimilarSection.Parent = scrollFrame
 
-	-- [[ 4G. ASPECT RATIO RESIZER SECTION ]] --
+	-- [[ 4H. ASPECT RATIO RESIZER SECTION ]] --
 	local aspectSection = AspectRatioResizer.Create()
 	aspectSection.Parent = scrollFrame
 
-	-- [[ 4H. MOVE TOOL SECTION ]] --
+	-- [[ 4I. MOVE TOOL SECTION ]] --
 	local moveToolSection = MoveTool.Create()
 	moveToolSection.Parent = scrollFrame
+
+	-- [[ 4J. WELD TOOL SECTION ]] --
+	local weldToolSection = WeldTool.Create()
+	weldToolSection.Parent = scrollFrame
 
 	-- [[ 5. ASSEMBLE WIDGET ]] --
 	header.Parent = mainContainer

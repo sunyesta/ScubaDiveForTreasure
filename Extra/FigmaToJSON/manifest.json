@@ -1,0 +1,10 @@
+{
+    "name": "Figma to JSON",
+    "id": "figma-to-json-plugin",
+    "api": "1.0.0",
+    "main": "code.js",
+    "ui": "ui.html",
+    "editorType": [
+        "figma"
+    ]
+}

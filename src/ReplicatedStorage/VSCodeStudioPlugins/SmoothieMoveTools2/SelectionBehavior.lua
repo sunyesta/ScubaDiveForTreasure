@@ -93,24 +93,30 @@ end
 function SelectionBehavior.CalculateTransformOrigin(): CFrame
 	local originMode = Props.Origin:Get()
 	local activePart = Props.ActivePart:Get()
-	local selectedParts = Props.SelectedParts:Get()
+	local selectedMovable = Props.SelectedMovableObjects:Get()
 
 	local newOrigin: CFrame
 
-	if #selectedParts == 0 then
+	if #selectedMovable == 0 then
 		return CFrame.new()
 	end
 
 	if originMode == Enums.Origin.Pivot and activePart then
-		-- Use the built-in Pivot API
-		newOrigin = activePart:GetPivot()
+		-- Use WorldCFrame for attachments, GetPivot for BaseParts/Models
+		if activePart:IsA("Attachment") then
+			newOrigin = activePart.WorldCFrame
+		else
+			newOrigin = activePart:GetPivot()
+		end
 	else
 		-- Center Mode: Calculate the center using Ritter's Minimum Enclosing Sphere algorithm
 		local positions: { Vector3 } = {}
 
-		for _, part in ipairs(selectedParts) do
-			if part:IsA("BasePart") then
-				table.insert(positions, part.Position)
+		for _, obj in ipairs(selectedMovable) do
+			if obj:IsA("BasePart") then
+				table.insert(positions, obj.Position)
+			elseif obj:IsA("Attachment") then
+				table.insert(positions, obj.WorldPosition)
 			end
 		end
 
@@ -118,7 +124,14 @@ function SelectionBehavior.CalculateTransformOrigin(): CFrame
 		local center: Vector3 = GetRitthersBoundingSphereCenter(positions)
 
 		-- Apply the rotation of the active part (or identity if none exists)
-		local rotation: CFrame = activePart and activePart:GetPivot().Rotation or CFrame.identity
+		local rotation: CFrame = CFrame.identity
+		if activePart then
+			if activePart:IsA("Attachment") then
+				rotation = activePart.WorldCFrame.Rotation
+			else
+				rotation = activePart:GetPivot().Rotation
+			end
+		end
 		newOrigin = CFrame.new(center) * rotation
 	end
 
@@ -167,6 +180,7 @@ function SelectionBehavior.Init(plugin: Plugin, pluginTrove: any)
 		Props.SelectedObjects:Set(selected)
 
 		local addedParts = {}
+		local addedMovable = {}
 
 		local selectedParts = TableUtil.Filter(selected, function(inst: Instance)
 			if inst:IsA("BasePart") then
@@ -188,13 +202,36 @@ function SelectionBehavior.Init(plugin: Plugin, pluginTrove: any)
 			return false
 		end)
 
+		local selectedMovableObjects = TableUtil.Filter(selected, function(inst: Instance)
+			if inst:IsA("BasePart") or inst:IsA("Attachment") then
+				return true
+			elseif inst:IsA("Model") then
+				-- If a Model is selected, extract its internal parts and attachments
+				for _, inst2 in inst:GetDescendants() do
+					if inst2 ~= inst.PrimaryPart and (inst2:IsA("BasePart") or inst2:IsA("Attachment")) then
+						table.insert(addedMovable, inst2)
+					end
+				end
+
+				-- Ensure the PrimaryPart is included if it exists
+				if inst.PrimaryPart then
+					table.insert(addedMovable, inst.PrimaryPart)
+				end
+			end
+
+			return false
+		end)
+
 		-- Merge the manually extracted model parts with the directly selected parts
 		selectedParts = TableUtil.Extend(selectedParts, addedParts)
-		Props.SelectedParts:Set(selectedParts)
+		selectedMovableObjects = TableUtil.Extend(selectedMovableObjects, addedMovable)
 
-		-- Update ActivePart: Usually the most recently selected valid part
-		if #selectedParts > 0 then
-			Props.ActivePart:Set(selectedParts[#selectedParts])
+		Props.SelectedParts:Set(selectedParts)
+		Props.SelectedMovableObjects:Set(selectedMovableObjects)
+
+		-- Update ActivePart: Usually the most recently selected valid part/attachment
+		if #selectedMovableObjects > 0 then
+			Props.ActivePart:Set(selectedMovableObjects[#selectedMovableObjects])
 		else
 			Props.ActivePart:Set(nil)
 		end
@@ -217,7 +254,8 @@ function SelectionBehavior.Init(plugin: Plugin, pluginTrove: any)
 	end)
 
 	-- Observe the ActivePart property to toggle the visualizer and update its position
-	pluginTrove:Add(Props.ActivePart:Observe(function(activePart: BasePart?)
+	-- Expects Instance? now to account for Attachments
+	pluginTrove:Add(Props.ActivePart:Observe(function(activePart: Instance?)
 		-- FIX: Always unbind the previous function before binding a new one!
 		-- This prevents Roblox from stacking different functions onto the same render step name.
 		RunService:UnbindFromRenderStep(RENDER_STEP_NAME)

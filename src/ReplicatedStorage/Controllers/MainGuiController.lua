@@ -46,7 +46,7 @@ function MainGuiController.GameStart()
 	-- Public properties
 	MainGuiController.ActiveGui = Property.ReadOnly(MainGuiController._ActiveGui)
 
-	-- MainGuiController.ReplaceWithRegistered("MainGui")
+	MainGuiController.ReplaceWithRegistered("CakeDecoratorGui")
 end
 
 return MainGuiController

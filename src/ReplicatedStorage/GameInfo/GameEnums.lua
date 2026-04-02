@@ -8,5 +8,6 @@ return {
 		Default = "Default",
 		Characters = "Characters",
 		NoCharacters = "NoCharacters",
+		NoEntities = "NoEntities",
 	},
 }
